@@ -1,0 +1,16 @@
+# Build artifacts
+*.exe
+*.o
+*.or
+*.res
+*.ppu
+*.a
+libimp*.a
+
+# Runtime/user data
+MemClip.dat
+MemClip.ini
+screenshots/
+
+# Windows reserved-name artifact
+nul
