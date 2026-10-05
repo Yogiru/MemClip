@@ -3,8 +3,13 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%207%2B-blue)
 ![Language](https://img.shields.io/badge/language-Free%20Pascal-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
+[![Release](https://img.shields.io/github/v/release/Yogiru/MemClip)](https://github.com/Yogiru/MemClip/releases/latest)
 
 Утилита «3 в 1» для Windows: очистка оперативной памяти (на базе MemCleaner) + история буфера обмена (идея CLCL) + захват текста с любых элементов интерфейса (идея Textify). Работает из системного трея, не создаёт консольного окна.
+
+## Скачать
+
+Готовый `MemClip.exe` — в разделе [Releases](https://github.com/Yogiru/MemClip/releases/latest). Установка не требуется: положите exe в любую папку и запустите (настройки и история создаются рядом с ним). Программа запрашивает права администратора — они нужны для очистки системной памяти.
 
 **Документация:** [USER_GUIDE.md](USER_GUIDE.md) — справка и инструкция для пользователя; [DEVELOPER.md](DEVELOPER.md) — архитектура и руководство разработчика.
 
