@@ -309,20 +309,20 @@ type
     Url: WideString;
   end;
 
-  IMediaControl = interface(IUnknown)
+  IMediaControl = interface(IDispatch)
     ['{56A868B1-0AD4-11CE-B03A-0020AF0BA770}']
     function Run: HResult; stdcall;
     function Pause: HResult; stdcall;
     function Stop: HResult; stdcall;
     function GetState(msTimeout: Longint; out pfs: Longint): HResult; stdcall;
     function RenderFile(strFilename: WideString): HResult; stdcall;
-    function AddSourceFilter(strFilename: WideString; out ppUnk: IUnknown): HResult; stdcall;
+    function AddSourceFilter(strFilename: WideString; out ppUnk: IDispatch): HResult; stdcall;
     function get_FilterCollection(out ppUnk: IDispatch): HResult; stdcall;
     function get_RegFilterCollection(out ppUnk: IDispatch): HResult; stdcall;
     function StopWhenReady: HResult; stdcall;
   end;
 
-  IBasicAudio = interface(IUnknown)
+  IBasicAudio = interface(IDispatch)
     ['{56A868B3-0AD4-11CE-B03A-0020AF0BA770}']
     function put_Volume(lVolume: Longint): HResult; stdcall;
     function get_Volume(out plVolume: Longint): HResult; stdcall;
