@@ -88,16 +88,14 @@ MouseHookThread — поток с WH_MOUSE_LL хуком (Ctrl+средний к
   `DuplicateTokenEx` (primary token) → `GetUserProfileDirectoryW` —
   профиль берётся у токена shell'а, а не из нашего окружения (иначе при
   элевации под другим админом чистился бы чужой профиль).
-- `ClearShellCache(glob, extraFile)` — общий код для двух пунктов меню:
-  иконки (`iconcache*.db` + `IconCache.db`) и миниатюры
-  (`thumbcache*.db`). `DeleteCacheGlob`/`DeleteShellCache` удаляют файлы
-  по маске в `AppData\Local\Microsoft\Windows\Explorer`.
+- `ClearShellCache` — один пункт меню чистит оба кэша: иконки
+  (`iconcache*.db` + `IconCache.db`) и миниатюры (`thumbcache*.db`),
+  `DeleteBoth` суммирует ошибки `DeleteShellCache`.
+  `DeleteCacheGlob`/`DeleteShellCache` удаляют файлы по маске в
+  `AppData\Local\Microsoft\Windows\Explorer`.
 - Файлы залочены работающим Explorer'ом → `TerminateProcess` → удаление →
   `CreateProcessAsUserW` с токеном shell'а: новый Explorer стартует
   **неэлеваированным** под интерактивным пользователем.
-- Группа «Система» также: «Очистить DNS-кэш» → `DnsFlushResolverCache`
-  (dnsapi.dll), «Очистить корзину» → `SHEmptyRecycleBinW` с флагами
-  `SHERB_NOCONFIRMATION|NOPROGRESSUI|NOSOUND` (оба импортируются вручную).
 - После рестарта Explorer шлёт broadcast `TaskbarCreated` — трей-иконка
   пересоздаётся автоматически (уже обрабатывается в `MainWndProc`).
 

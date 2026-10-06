@@ -49,7 +49,7 @@ const
   IDM_HK_CLIP = 108;
   IDM_HK_GRAB = 109;
   IDM_ICONCACHE = 110;
-  IDM_THUMBCACHE = 111;
+
   IDM_CLIPMERGE = 112;
   IDM_HK_PLAIN = 113;
   IDM_HK_OCR = 114;
@@ -62,8 +62,7 @@ const
   IDM_CTX_DEL = 121;
   IDM_CTX_SAVE = 137;
   IDM_UPDATE = 138;
-  IDM_DNS = 122;
-  IDM_BIN = 123;
+
   IDM_LANG_AUTO = 124;
   IDM_LANG_RU = 125;
   IDM_LANG_UK = 126;
@@ -196,7 +195,6 @@ type
     txtIconCache,
     txtIcoCacheDone,
     txtIcoCacheFail,
-    txtThumbCache,
     txtClipMerge,
     txtHistoryWnd,
     txtSearchHint,
@@ -221,10 +219,6 @@ type
     txtBtnDelete,
     txtLangMenu,
     txtLangAuto,
-    txtDns,
-    txtBin,
-    txtDnsDone,
-    txtBinDone,
     txtTipUsed,
     txtEditTitle,
     txtBtnSave,
@@ -545,10 +539,9 @@ const
      'Нажмите сочетание клавиш (Esc — отмена)',
      'Добавьте Ctrl, Alt, Shift или Win',
      'Ctrl+Колесо мыши — захват',
-     'Очистить кэш иконок',
+     'Очистить кэш иконок и миниатюр',
      'Кэш очищен',
      'Не удалось очистить кэш',
-     'Очистить кэш миниатюр',
      'Склеивать копии',
      'Окно истории',
      'Поиск...',
@@ -573,10 +566,6 @@ const
      'Удалить',
      'Язык',
      'Авто',
-     'Очистить кэш DNS',
-     'Очистить корзину',
-     'Кэш DNS очищен',
-     'Корзина очищена',
      'MemClip: %d%% занято',
      'Разметка скриншота',
      'Сохранить',
@@ -647,10 +636,9 @@ const
      'Натисніть сполучення клавіш (Esc — скасувати)',
      'Додайте Ctrl, Alt, Shift або Win',
      'Ctrl+Коліщатко миші — захоплення',
-     'Очистити кеш іконок',
+     'Очистити кеш іконок і мініатюр',
      'Кеш очищено',
      'Не вдалося очистити кеш',
-     'Очистити кеш мініатюр',
      'Склеювати копії',
      'Вікно історії',
      'Пошук...',
@@ -675,10 +663,6 @@ const
      'Видалити',
      'Мова',
      'Авто',
-     'Очистити кеш DNS',
-     'Очистити кошик',
-     'Кеш DNS очищено',
-     'Кошик очищено',
      'MemClip: %d%% зайнято',
      'Розмітка скріншота',
      'Зберегти',
@@ -749,10 +733,9 @@ const
      'Націсніце спалучэнне клавіш (Esc — адмяніць)',
      'Дадайце Ctrl, Alt, Shift або Win',
      'Ctrl+Коліка мышы — захопленне',
-     'Ачысціць кэш значкоў',
+     'Ачысціць кэш значкоў і мініяцюр',
      'Кэш ачышчаны',
      'Не атрымалася ачысціць кэш',
-     'Ачысціць кэш мініяцюр',
      'Склейваць копіі',
      'Акно гісторыі',
      'Пошук...',
@@ -777,10 +760,6 @@ const
      'Выдаліць',
      'Мова',
      'Аўта',
-     'Ачысціць кэш DNS',
-     'Ачысціць сметніцу',
-     'Кэш DNS ачышчаны',
-     'Сметніца ачышчаная',
      'MemClip: %d%% занята',
      'Разметка скрыншота',
      'Захаваць',
@@ -851,10 +830,9 @@ const
      'Press a key combination (Esc — cancel)',
      'Add Ctrl, Alt, Shift or Win',
      'Ctrl+MMB — grab',
-     'Clear icon cache',
+     'Clear icon and thumbnail cache',
      'Cache cleared',
      'Failed to clear cache',
-     'Clear thumbnail cache',
      'Merge sequential copies',
      'History window',
      'Search...',
@@ -879,10 +857,6 @@ const
      'Delete',
      'Language',
      'Auto',
-     'Flush DNS cache',
-     'Empty recycle bin',
-     'DNS cache flushed',
-     'Recycle bin emptied',
      'MemClip: %d%% used',
      'Annotate screenshot',
      'Save',
@@ -914,7 +888,7 @@ function NtSetSystemInformation(SystemInformationClass: DWORD; SystemInformation
 function EmptyWorkingSet(hProcess: HANDLE): BOOL; stdcall; external 'psapi.dll' name 'EmptyWorkingSet';
 function EnumProcesses(lpidProcess: PLongWord; cb: LongWord; out cbNeeded: DWORD): BOOL; stdcall; external 'psapi.dll' name 'EnumProcesses';
 function GlobalMemoryStatusEx(var lpBuffer: TMemoryStatusEx): BOOL; stdcall; external 'kernel32' name 'GlobalMemoryStatusEx';
-function DnsFlushResolverCache: BOOL; stdcall; external 'dnsapi.dll' name 'DnsFlushResolverCache';
+
 function TrackPopupMenuCmd(hMenu: HMENU; uFlags: UINT; x, y, nReserved: Integer; hWnd: HWND; prcRect: Pointer): UINT; stdcall; external 'user32.dll' name 'TrackPopupMenu';
 
 type
@@ -950,7 +924,7 @@ function InternetOpenUrlMcW(h: Pointer; url, headers: PWideChar; headersLen: DWO
 function InternetReadFileMc(h: Pointer; buf: Pointer; num: DWORD;
   out read: DWORD): BOOL; stdcall; external 'wininet.dll' name 'InternetReadFile';
 function InternetCloseHandleMc(h: Pointer): BOOL; stdcall; external 'wininet.dll' name 'InternetCloseHandle';
-function SHEmptyRecycleBinW(hWnd: HWND; pszRootPath: PWideChar; dwFlags: DWORD): HRESULT; stdcall; external 'shell32.dll' name 'SHEmptyRecycleBinW';
+
 function AddClipboardFormatListener(hwnd: HWND): BOOL; stdcall; external 'user32.dll' name 'AddClipboardFormatListener';
 function RoInitialize(initType: Longint): HRESULT; stdcall; external 'combase.dll';
 function RoGetActivationFactory(activatableClassId: HSTR; const iid: TGUID; out factory): HRESULT; stdcall; external 'combase.dll';
@@ -6071,7 +6045,7 @@ begin
       Inc(Result);
 end;
 
-procedure ClearShellCache(const glob, extraFile: WideString);
+procedure ClearShellCache;
 var
   hShell: HWND;
   pid, cch: DWORD;
@@ -6080,6 +6054,16 @@ var
   profile, explorerExe: WideString;
   si: TStartupInfoW;
   pi: TProcessInformation;
+
+  function DeleteBoth: Integer;
+  var
+    dir: WideString;
+  begin
+    dir := profile + '\AppData\Local';
+    Result := DeleteShellCache(dir, 'iconcache*.db', 'IconCache.db') +
+      DeleteShellCache(dir, 'thumbcache*.db', '');
+  end;
+
 begin
   hShell := GetShellWindow;
   if hShell = 0 then
@@ -6099,13 +6083,13 @@ begin
      GetUserProfileDirectoryW(hPri, @prof[0], cch) then
   begin
     profile := prof;
-    if DeleteShellCache(profile + '\AppData\Local', glob, extraFile) = 0 then
+    if DeleteBoth = 0 then
       QueueInfo(GetText(txtIcoCacheDone))
     else if TerminateProcess(hProc, 0) then
     begin
       // shell was holding the files: restart Explorer as the interactive user
       Sleep(700);
-      DeleteShellCache(profile + '\AppData\Local', glob, extraFile);
+      DeleteBoth;
       FillChar(si, SizeOf(si), 0);
       si.cb := SizeOf(si);
       FillChar(pi, SizeOf(pi), 0);
@@ -6228,9 +6212,6 @@ begin
   { --- Система --- }
   AddGroupHeader(txtGrpSys);
   AppendMenuW(TrayMenu, MF_STRING, IDM_ICONCACHE, PWideChar(AsWide(GetText(txtIconCache))));
-  AppendMenuW(TrayMenu, MF_STRING, IDM_THUMBCACHE, PWideChar(AsWide(GetText(txtThumbCache))));
-  AppendMenuW(TrayMenu, MF_STRING, IDM_DNS, PWideChar(AsWide(GetText(txtDns))));
-  AppendMenuW(TrayMenu, MF_STRING, IDM_BIN, PWideChar(AsWide(GetText(txtBin))));
   AppendMenuW(TrayMenu, MF_STRING, IDM_UPDATE, PWideChar(AsWide(GetText(txtUpdate))));
 
   hk1 := AsWide(GetText(txtHkClip)) + '   ' + HotkeyText(HotkeyClipMods, HotkeyClipVk);
@@ -6482,16 +6463,8 @@ begin
               ForceRun := True;
               SetEvent(hEvent);
             end;
-          IDM_ICONCACHE: ClearShellCache('iconcache*.db', 'IconCache.db');
-          IDM_THUMBCACHE: ClearShellCache('thumbcache*.db', '');
+          IDM_ICONCACHE: ClearShellCache;
           IDM_SNIP: ShowSnip;
-          IDM_DNS:
-            if DnsFlushResolverCache then
-              QueueInfo(GetText(txtDnsDone));
-          IDM_BIN:
-            if SHEmptyRecycleBinW(hWnd, nil,
-              SHERB_NOCONFIRMATION or SHERB_NOPROGRESSUI or SHERB_NOSOUND) >= 0 then
-              QueueInfo(GetText(txtBinDone));
           IDM_UPDATE:
             CheckUpdates;
           IDM_LANG_AUTO: SetLangChoice('auto');
