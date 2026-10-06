@@ -318,11 +318,11 @@ vtable точный. `IInspectable` добавляет `GetIids`/`GetRuntimeClas
   область видна яркой; в `WM_PAINT` рисуется белое кольцо и размер WxH.
 - `WM_LBUTTONUP` → `DestroyWindow`, `Sleep(120)` на перерисовку,
   `SnipFinish`: `CreateDIBSection`(32bpp top-down) + `BitBlt` со screen DC.
-- Режимы по модификаторам при отпускании: обычный → `CF_BITMAP` +
-  `PNG` (GDI+ `GdipSaveImageToStream`) в буфер; Ctrl →
-  `OcrPixelsToText` → `ShowGrabDialog`; Shift → `GdipSaveImageToFile`
-  в `screenshots\clip_yyyymmdd_hhnnss.png` + копия в буфер; Alt →
-  `ShowSnipEditor` (разметка). Общий хвост «PNG + буфер/файл» вынесен
+- Режимы по модификаторам при отпускании: обычный → `ShowSnipEditor`
+  (разметка); Alt → сразу `CF_BITMAP` + `PNG` (GDI+ `GdipSaveImageToStream`)
+  в буфер; Ctrl → `OcrPixelsToText` → `ShowGrabDialog`; Shift →
+  `GdipSaveImageToFile` в `screenshots\clip_yyyymmdd_hhnnss.png` +
+  копия в буфер. Общий хвост «PNG + буфер/файл» вынесен
   в `SnipCommitBitmap(bmp, w, h, doSave)`.
 - `SnipWindow`/`SnipAll` (`HOTKEY_SNIPWND`/`HOTKEY_SNIPALL`) — снимок
   `GetWindowRect(GetForegroundWindow)` / виртуального экрана напрямую

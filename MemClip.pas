@@ -532,7 +532,7 @@ const
      'Скриншот области',
      'Скриншот %dx%d в буфере',
      'Скриншот сохранён: %s',
-     'Протяните для выбора области. Отпускание — в буфер, +Ctrl — OCR, +Shift — сохранить PNG, +Alt — разметка. Esc — отмена',
+     'Протяните для выбора области. Отпускание — редактор разметки, +Alt — сразу в буфер, +Ctrl — OCR, +Shift — сохранить PNG. Esc — отмена',
      'Память (RAM)',
      'Буфер обмена',
      'Захват и скриншоты',
@@ -626,7 +626,7 @@ const
      'Скріншот області',
      'Скріншот %dx%d у буфері',
      'Скріншот збережено: %s',
-     'Протягніть для вибору області. Відпускання — у буфер, +Ctrl — OCR, +Shift — зберегти PNG, +Alt — розмітка. Esc — скасувати',
+     'Протягніть для вибору області. Відпускання — редактор розмітки, +Alt — одразу в буфер, +Ctrl — OCR, +Shift — зберегти PNG. Esc — скасувати',
      'Пам''ять (RAM)',
      'Буфер обміну',
      'Захоплення і скріншоти',
@@ -720,7 +720,7 @@ const
      'Скрыншот вобласці',
      'Скрыншот %dx%d у буферы',
      'Скрыншот захаваны: %s',
-     'Працягніце для выбару вобласці. Адпусканне — у буфер, +Ctrl — OCR, +Shift — захаваць PNG, +Alt — разметка. Esc — адмена',
+     'Працягніце для выбару вобласці. Адпусканне — рэдактар разметкі, +Alt — адразу ў буфер, +Ctrl — OCR, +Shift — захаваць PNG. Esc — адмена',
      'Памяць (RAM)',
      'Буфер абмену',
      'Захопленне і скрыншоты',
@@ -814,7 +814,7 @@ const
      'Capture screen region',
      'Screenshot %dx%d in clipboard',
      'Screenshot saved: %s',
-     'Drag to select a region. Release — to clipboard, +Ctrl — OCR, +Shift — save PNG, +Alt — annotate. Esc — cancel',
+     'Drag to select a region. Release — annotate editor, +Alt — straight to clipboard, +Ctrl — OCR, +Shift — save PNG. Esc — cancel',
      'Memory (RAM)',
      'Clipboard',
      'Capture & screenshots',
@@ -3521,7 +3521,7 @@ begin
       Exit;
     end;
   end;
-  Result := CallWindowProc(WNDPROC(OldGrabEditProc), hWnd, uMsg, wParam, lParam);
+  Result := CallWindowProcW(WNDPROC(OldGrabEditProc), hWnd, uMsg, wParam, lParam);
 end;
 
 procedure GrabCopyAndClose(hWnd: HWND);
@@ -3901,9 +3901,9 @@ begin
         else if GetKeyState(VK_SHIFT) < 0 then
           mode := 2
         else if GetKeyState(VK_MENU) < 0 then
-          mode := 3
+          mode := 0
         else
-          mode := 0;
+          mode := 3;
         DestroyWindow(hWnd);
         SnipFinish(rc, mode);
       end;
@@ -4350,6 +4350,7 @@ begin
       sh.A := EditTextAnchor;
       sh.Text := ws;
       EditAddShape(sh);
+      InvalidateRect(hEditWnd, nil, False);
     end;
   end;
   hEditInput := 0;
@@ -4371,7 +4372,7 @@ begin
       Exit(0);
     end;
   end;
-  Result := CallWindowProc(WNDPROC(OldEditInputProc), hWnd, uMsg, wParam, lParam);
+  Result := CallWindowProcW(WNDPROC(OldEditInputProc), hWnd, uMsg, wParam, lParam);
 end;
 
 procedure EditOpenTextInput(hWnd: HWND; imgPt: TPoint);
@@ -4382,9 +4383,9 @@ begin
   EditTextAnchor := imgPt;
   x := Round(imgPt.X * EditScale);
   y := EDIT_TB_H + Round(imgPt.Y * EditScale);
-  hEditInput := CreateWindowExW(WS_EX_CLIENTEDGE, 'EDIT', '',
+  hEditInput := CreateWindowExW(WS_EX_CLIENTEDGE, PWideChar(WideString('EDIT')), '',
     WS_CHILD or WS_VISIBLE or ES_AUTOHSCROLL,
-    x, y, 160, 26, hWnd, HMENU(IDC_ED_INPUT), HInstance, nil);
+    x, y, 180, 26, hWnd, HMENU(IDC_ED_INPUT), HInstance, nil);
   if hEditInput = 0 then
     Exit;
   SendMessage(hEditInput, WM_SETFONT, hPopupFont, 1);
@@ -4444,7 +4445,7 @@ begin
         dh := Round(EditH * EditScale);
         for i := 0 to TOOL_COUNT - 1 do
         begin
-          hEdTool[i] := CreateWindowExW(0, 'BUTTON',
+          hEdTool[i] := CreateWindowExW(0, PWideChar(WideString('BUTTON')),
             PWideChar(AsWide(GetText(TOOL_TEXTS[i]))),
             WS_CHILD or WS_VISIBLE or WS_TABSTOP or
             BS_PUSHLIKE_ST or BS_AUTOCHECKBOX,
@@ -4454,24 +4455,24 @@ begin
         end;
         for i := 0 to COLOR_COUNT - 1 do
         begin
-          hEdCol[i] := CreateWindowExW(0, 'BUTTON', '',
+          hEdCol[i] := CreateWindowExW(0, PWideChar(WideString('BUTTON')), '',
             WS_CHILD or WS_VISIBLE or BS_OWNERDRAW,
             6 + TOOL_COUNT * (TOOL_BTN_W + 4) + 10 + i * 28, 6, 24, 22,
             hWnd, HMENU(IDC_ED_COLS + i), HInstance, nil);
         end;
-        hEdOk := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnCopy))),
+        hEdOk := CreateWindowExW(0, PWideChar(WideString('BUTTON')), PWideChar(AsWide(GetText(txtBtnCopy))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
           8, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_OK), HInstance, nil);
-        hEdSave := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnSave))),
+        hEdSave := CreateWindowExW(0, PWideChar(WideString('BUTTON')), PWideChar(AsWide(GetText(txtBtnSave))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
           110, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_SAVE), HInstance, nil);
-        hEdUndo := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnUndo))),
+        hEdUndo := CreateWindowExW(0, PWideChar(WideString('BUTTON')), PWideChar(AsWide(GetText(txtBtnUndo))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
           212, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_UNDO), HInstance, nil);
-        hEdReset := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnReset))),
+        hEdReset := CreateWindowExW(0, PWideChar(WideString('BUTTON')), PWideChar(AsWide(GetText(txtBtnReset))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
           314, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_RESET), HInstance, nil);
-        hEdCancel := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnCancel))),
+        hEdCancel := CreateWindowExW(0, PWideChar(WideString('BUTTON')), PWideChar(AsWide(GetText(txtBtnCancel))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
           dw - 104, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_CANCEL), HInstance, nil);
         SendMessage(hEdOk, WM_SETFONT, hPopupFont, 1);
