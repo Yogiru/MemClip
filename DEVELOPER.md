@@ -320,6 +320,20 @@ GDI+→`GetDIBits` top-down) и прогоняет `OcrPixelsToText`; общий
 компонентам) → `MessageBox` + `ShellExecuteW` на `html_url` релиза.
 Ничего не скачивается и не ставится автоматически.
 
+### Радио (DirectShow)
+
+- Подменю `Радио` (станции `IDM_RADIO_BASE+i`, `Стоп`, `Тише`/`Громче`).
+  Воспроизведение через встроенный DirectShow: `CoCreateInstance
+  (CLSID_FilterGraph)` → `IMediaControl.RenderFile(url)` — URL-источник
+  Windows сам открывает MP3-поток по http(s) → `Run`. Интерфейсы
+  `IMediaControl`/`IBasicAudio` объявлены вручную по vtable.
+- Громкость — `IBasicAudio.put_Volume` (санти-белы, маппинг
+  `3000*log10(v/100)`; 0=тишина -10000, 100=полная 0).
+- Станции: `RADIO_DEF_*` (4 встроенные) + `[radio] stationN=Name|URL`
+  из INI — объединяются в `RadioNames`/`RadioUrls` при загрузке.
+- `RadioStop` вызывается из `WM_DESTROY` — граф останавливается и
+  освобождается, COM-ссылки обнуляются.
+
 ### Диалог захвата (`ShowGrabDialog`, класс `MemClipGrab`)
 
 - Окно 480×200 у курсора, светло-оранжевый фон `RGB(255,206,163)`,

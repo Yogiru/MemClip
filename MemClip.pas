@@ -62,6 +62,14 @@ const
   IDM_CTX_DEL = 121;
   IDM_CTX_SAVE = 137;
   IDM_UPDATE = 138;
+  IDM_RADIO_BASE = 140;
+  IDM_RADIO_MAX = 171;
+  IDM_RADIO_STOP = 172;
+  IDM_RADIO_VOLDN = 173;
+  IDM_RADIO_VOLUP = 174;
+
+  RADIO_BUILTIN = 4;
+  RADIO_MAX = 32;
 
   IDM_LANG_AUTO = 124;
   IDM_LANG_RU = 125;
@@ -97,6 +105,24 @@ const
 
   APP_VERSION = '1.1.0';
   UPD_API_URL = 'https://api.github.com/repos/Yogiru/MemClip/releases/latest';
+
+  CLSID_FILTER_GRAPH: TGUID = (D1: $E436EBB3; D2: $524F; D3: $11CE;
+    D4: ($9F, $53, $00, $20, $AF, $0B, $A7, $70));
+  IID_IMEDIA_CONTROL: TGUID = (D1: $56A868B1; D2: $0AD4; D3: $11CE;
+    D4: ($B0, $3A, $00, $20, $AF, $0B, $A7, $70));
+  IID_IBASIC_AUDIO: TGUID = (D1: $56A868B3; D2: $0AD4; D3: $11CE;
+    D4: ($B0, $3A, $00, $20, $AF, $0B, $A7, $70));
+
+  RADIO_DEF_NAMES: array[0..RADIO_BUILTIN - 1] of string = (
+    'Groove Salad (ambient)',
+    'Drone Zone (ambient)',
+    'Fluid (chill electronic)',
+    'Radio Paradise (mix)');
+  RADIO_DEF_URLS: array[0..RADIO_BUILTIN - 1] of string = (
+    'https://ice1.somafm.com/groovesalad-128-mp3',
+    'https://ice1.somafm.com/dronezone-128-mp3',
+    'https://ice1.somafm.com/fluid-128-mp3',
+    'https://stream.radioparadise.com/mp3-192');
 
   TIMER_EXIT = 2;
   TIMER_CLIPCAPTURE = 3;
@@ -239,7 +265,13 @@ type
     txtUpdate,
     txtUpdateNew,
     txtUpdateLatest,
-    txtUpdateErr
+    txtUpdateErr,
+    txtRadio,
+    txtRadioStop,
+    txtRadioOn,
+    txtRadioFail,
+    txtVolDn,
+    txtVolUp
   );
 
   TClipKind = (ckText, ckImage, ckFiles);
@@ -275,6 +307,27 @@ type
     Ok: Boolean;
     Ver: string;
     Url: WideString;
+  end;
+
+  IMediaControl = interface(IUnknown)
+    ['{56A868B1-0AD4-11CE-B03A-0020AF0BA770}']
+    function Run: HResult; stdcall;
+    function Pause: HResult; stdcall;
+    function Stop: HResult; stdcall;
+    function GetState(msTimeout: Longint; out pfs: Longint): HResult; stdcall;
+    function RenderFile(strFilename: WideString): HResult; stdcall;
+    function AddSourceFilter(strFilename: WideString; out ppUnk: IUnknown): HResult; stdcall;
+    function get_FilterCollection(out ppUnk: IDispatch): HResult; stdcall;
+    function get_RegFilterCollection(out ppUnk: IDispatch): HResult; stdcall;
+    function StopWhenReady: HResult; stdcall;
+  end;
+
+  IBasicAudio = interface(IUnknown)
+    ['{56A868B3-0AD4-11CE-B03A-0020AF0BA770}']
+    function put_Volume(lVolume: Longint): HResult; stdcall;
+    function get_Volume(out plVolume: Longint): HResult; stdcall;
+    function put_Balance(lBalance: Longint): HResult; stdcall;
+    function get_Balance(out plBalance: Longint): HResult; stdcall;
   end;
 
   TMSLLHookStruct = record
@@ -586,7 +639,13 @@ const
      'Проверить обновления',
      'Доступна версия %s — открыть страницу загрузки?',
      'У вас последняя версия',
-     'Не удалось проверить обновления'),
+     'Не удалось проверить обновления',
+     'Радио',
+     'Стоп',
+     'Радио: %s',
+     'Не удалось запустить поток',
+     'Тише',
+     'Громче'),
 
     // Ukrainian
     ('MemClip',
@@ -683,7 +742,13 @@ const
      'Перевірити оновлення',
      'Доступна версія %s — відкрити сторінку завантаження?',
      'У вас остання версія',
-     'Не вдалося перевірити оновлення'),
+     'Не вдалося перевірити оновлення',
+     'Радіо',
+     'Стоп',
+     'Радіо: %s',
+     'Не вдалося запустити потік',
+     'Тихіше',
+     'Гучніше'),
 
     // Belarusian
     ('MemClip',
@@ -780,7 +845,13 @@ const
      'Праверыць абнаўленні',
      'Даступная версія %s — адкрыць старонку спампоўкі?',
      'У вас апошняя версія',
-     'Не ўдалося праверыць абнаўленні'),
+     'Не ўдалося праверыць абнаўленні',
+     'Радыё',
+     'Стоп',
+     'Радыё: %s',
+     'Не ўдалося запусціць паток',
+     'Цішэй',
+     'Гучней'),
 
     // English
     ('MemClip',
@@ -877,7 +948,13 @@ const
      'Check for updates',
      'Version %s is available — open the download page?',
      'You have the latest version',
-     'Could not check for updates')
+     'Could not check for updates',
+     'Radio',
+     'Stop',
+     'Radio: %s',
+     'Could not start the stream',
+     'Quieter',
+     'Louder')
   );
 
 const
@@ -1024,6 +1101,12 @@ var
   OcrCs: TRTLCriticalSection;
   OcrIdxPending: Longint;
   UpdateChecking: Boolean;
+  gRadioMC: IMediaControl;
+  gRadioBA: IBasicAudio;
+  RadioStation: Integer;
+  RadioVolume: Integer;
+  RadioNames: array of WideString;
+  RadioUrls: array of WideString;
   // Snip overlay (screenshot region)
   hSnipWnd: HWND;
   SnipClsReg: Boolean;
@@ -3837,6 +3920,118 @@ begin
   end;
 end;
 
+{ ==================== Online radio (DirectShow) ==================== }
+
+function RadioStationCount: Integer;
+begin
+  Result := Length(RadioNames);
+end;
+
+procedure RadioApplyVolume;
+var
+  v: Longint;
+begin
+  if gRadioBA = nil then
+    Exit;
+  if RadioVolume <= 0 then
+    v := -10000
+  else
+  begin
+    v := Round(3000 * Log10(RadioVolume / 100));
+    if v < -10000 then
+      v := -10000;
+  end;
+  gRadioBA.put_Volume(v);
+end;
+
+procedure RadioStop;
+begin
+  if gRadioMC <> nil then
+  begin
+    gRadioMC.Stop;
+    gRadioBA := nil;
+    gRadioMC := nil;
+  end;
+  RadioStation := -1;
+end;
+
+procedure RadioPlay(idx: Integer);
+var
+  mc: IMediaControl;
+begin
+  if (idx < 0) or (idx >= RadioStationCount) then
+    Exit;
+  RadioStop;
+  if CoCreateInstance(CLSID_FILTER_GRAPH, nil, CLSCTX_INPROC_SERVER,
+    IID_IMEDIA_CONTROL, mc) <> S_OK then
+  begin
+    QueueInfo(GetText(txtRadioFail));
+    Exit;
+  end;
+  if mc.RenderFile(RadioUrls[idx]) = S_OK then
+  begin
+    mc.Run;
+    gRadioMC := mc;
+    gRadioBA := nil;
+    if mc.QueryInterface(IID_IBASIC_AUDIO, gRadioBA) = S_OK then
+      RadioApplyVolume;
+    RadioStation := idx;
+    QueueInfo(Format(GetText(txtRadioOn), [AsUTF8(RadioNames[idx])]));
+  end
+  else
+    QueueInfo(GetText(txtRadioFail));
+end;
+
+procedure RadioVolStep(delta: Integer);
+begin
+  RadioVolume := RadioVolume + delta;
+  if RadioVolume < 0 then
+    RadioVolume := 0;
+  if RadioVolume > 100 then
+    RadioVolume := 100;
+  RadioApplyVolume;
+  SaveConfig;
+end;
+
+procedure LoadRadioCfg(const p: PWideChar);
+var
+  i, cnt, bar: Integer;
+  buf: array[0..2047] of WideChar;
+  s, key: WideString;
+begin
+  SetLength(RadioNames, RADIO_BUILTIN);
+  SetLength(RadioUrls, RADIO_BUILTIN);
+  for i := 0 to RADIO_BUILTIN - 1 do
+  begin
+    RadioNames[i] := AsWide(RADIO_DEF_NAMES[i]);
+    RadioUrls[i] := AsWide(RADIO_DEF_URLS[i]);
+  end;
+  cnt := RADIO_BUILTIN;
+  for i := 1 to RADIO_MAX do
+  begin
+    key := AsWide('station' + IntToStr(i));
+    GetPrivateProfileStringW(PWideChar(WideString('radio')),
+      PWideChar(key), nil, @buf[0], SizeOf(buf) div 2, p);
+    s := WideString(PWideChar(@buf[0]));
+    if s = '' then
+      Continue;
+    bar := Pos('|', s);
+    if (bar <= 1) or (bar >= Length(s)) then
+      Continue;
+    SetLength(RadioNames, cnt + 1);
+    SetLength(RadioUrls, cnt + 1);
+    RadioNames[cnt] := Copy(s, 1, bar - 1);
+    RadioUrls[cnt] := Copy(s, bar + 1, Length(s) - bar);
+    Inc(cnt);
+  end;
+  RadioVolume := GetPrivateProfileIntW(PWideChar(WideString('radio')),
+    PWideChar(WideString('volume')), 70, p);
+  if RadioVolume < 0 then
+    RadioVolume := 0;
+  if RadioVolume > 100 then
+    RadioVolume := 100;
+end;
+
 function UiaElementRect(pt: TPoint; out rc: TRect): Boolean;
 var
   uia: IUIAutomation;
@@ -5680,6 +5875,7 @@ begin
   if n > 0 then
     buf[n] := #0;
   ClipExcludeProcs := WideLowerCase(WideString(PWideChar(@buf[0])));
+  LoadRadioCfg(p);
 end;
 
 procedure SaveConfig;
@@ -5747,6 +5943,8 @@ begin
     PWideChar(AsWide(IntToStr(ClipHistoryMax))), p);
   WritePrivateProfileStringW(PWideChar(WideString('clipboard')), PWideChar(WideString('keep_days')),
     PWideChar(AsWide(IntToStr(ClipKeepDays))), p);
+  WritePrivateProfileStringW(PWideChar(WideString('radio')), PWideChar(WideString('volume')),
+    PWideChar(AsWide(IntToStr(RadioVolume))), p);
 end;
 
 function HkWndProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall;
@@ -6119,11 +6317,12 @@ end;
 
 procedure ShowTrayMenu(x, y: Integer);
 var
-  TrayMenu, IntervalMenu, HkMenu, LangMenu: HMENU;
+  TrayMenu, IntervalMenu, HkMenu, LangMenu, RadioMenu: HMENU;
   uFlags: UINT;
   sManual, sClean, sAutostart, sInterval, sExit: string;
   sClipWatch, sClipAutoPaste, sGrabToggle: string;
   hk1, hk2, hk3, hk4, hk5, hk6, hk7, hk8: WideString;
+  i: Integer;
 
   procedure AddIntervalItem(id: UINT; const labelText: string; intervalMs: DWORD);
   begin
@@ -6213,6 +6412,20 @@ begin
   AddGroupHeader(txtGrpSys);
   AppendMenuW(TrayMenu, MF_STRING, IDM_ICONCACHE, PWideChar(AsWide(GetText(txtIconCache))));
   AppendMenuW(TrayMenu, MF_STRING, IDM_UPDATE, PWideChar(AsWide(GetText(txtUpdate))));
+  RadioMenu := CreatePopupMenu;
+  for i := 0 to RadioStationCount - 1 do
+  begin
+    uFlags := MF_STRING;
+    if RadioStation = i then
+      uFlags := uFlags or MF_CHECKED;
+    AppendMenuW(RadioMenu, uFlags, IDM_RADIO_BASE + i, PWideChar(RadioNames[i]));
+  end;
+  AppendMenuW(RadioMenu, MF_SEPARATOR, 0, nil);
+  AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_STOP, PWideChar(AsWide(GetText(txtRadioStop))));
+  AppendMenuW(RadioMenu, MF_SEPARATOR, 0, nil);
+  AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_VOLDN, PWideChar(AsWide(GetText(txtVolDn))));
+  AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_VOLUP, PWideChar(AsWide(GetText(txtVolUp))));
+  AppendMenuW(TrayMenu, MF_POPUP, UINT(RadioMenu), PWideChar(AsWide(GetText(txtRadio))));
 
   hk1 := AsWide(GetText(txtHkClip)) + '   ' + HotkeyText(HotkeyClipMods, HotkeyClipVk);
   hk2 := AsWide(GetText(txtGrabTitle)) + '   ' + HotkeyText(HotkeyGrabMods, HotkeyGrabVk);
@@ -6467,6 +6680,14 @@ begin
           IDM_SNIP: ShowSnip;
           IDM_UPDATE:
             CheckUpdates;
+          IDM_RADIO_STOP:
+            RadioStop;
+          IDM_RADIO_VOLDN:
+            RadioVolStep(-10);
+          IDM_RADIO_VOLUP:
+            RadioVolStep(10);
+          IDM_RADIO_BASE..IDM_RADIO_MAX:
+            RadioPlay((wParam and $FFFF) - IDM_RADIO_BASE);
           IDM_LANG_AUTO: SetLangChoice('auto');
           IDM_LANG_RU: SetLangChoice('ru');
           IDM_LANG_UK: SetLangChoice('uk');
@@ -6594,6 +6815,7 @@ begin
     WM_DESTROY:
       begin
         Exiting := True;
+        RadioStop;
         SetEvent(hEvent);
         if hGrabWnd <> 0 then
           DestroyWindow(hGrabWnd);
