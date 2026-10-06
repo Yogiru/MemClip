@@ -334,17 +334,28 @@ vtable точный. `IInspectable` добавляет `GetIids`/`GetRuntimeClas
 
 ### Редактор разметки (`ShowSnipEditor`, класс `MemClipEdit`)
 
-- Окно с заголовком по центру экрана: изображение вписывается масштабом
-  `EditScale` (≤1, StretchBlt HALFTONE), под ним ряд кнопок
-  «Копировать»/«Сохранить»/«Сбросить»/«Отмена» (`IDC_ED_*`).
-- Drag мышью → красная рамка 3px в координатах исходного битмапа
-  (`EditRects: array of TRect`, преобразование через `EditScale`);
-  текущая рамка рисуется в `WM_PAINT`, при отпускании фиксируется
-  в списке (мин. 3 px).
-- Коммит (`EditCommit`): `CreateCompatibleBitmap` полного размера +
-  `EditRender` (BitBlt исходника + `FrameRect` по всем рамкам) →
-  `SnipCommitBitmap` — размеченный снимок уходит в буфер/файл как
-  обычный скриншот. `EditBmp` удаляется в `WM_DESTROY`.
+- Окно в духе Lightshot: сверху панель инструментов (`EDIT_TB_H`) —
+  push-like кнопки `BS_PUSHLIKE|BS_AUTOCHECKBOX` (карандаш/линия/
+  стрелка/рамка/текст/размытие, `IDC_ED_TOOLS+i`, взаимоисключение
+  через `BM_SETCHECK`) + 6 owner-drawn кнопок цвета (`IDC_ED_COLS+i`,
+  рисуются в `WM_DRAWITEM`, активный цвет — чёрная рамка).
+- Шейпы — `EditShapes: array of TEditShape` (инструмент, цвет, якоря
+  A/B в координатах исходника, `Pts` для карандаша, `Text` для текста);
+  отрисовка — `EditShapeDraw(dc, shape, scale, offY)` одна и для
+  превью (масштаб `EditScale`) и для коммита (scale=1).
+- Текст: клик создаёт сабклассированный `EDIT` (`EditInputProc` —
+  Enter фиксирует, Esc отменяет, `EN_KILLFOCUS` фиксирует).
+- Размытие — `EditApplyBlur`: пикселизация блоками `EDIT_BLUR_SZ=8`px
+  прямо в `EditBmp` через `GetDIBits`/`SetDIBits` (деструктивно,
+  как в Lightshot); перед применением снимается снапшот
+  `EditCopyBmp` в `EditUndoLog`.
+- Undo — `EditUndoLog: array of TEditUndo` (shape-pop или
+  bitmap-restore); Ctrl+Z и кнопка «Назад».
+- «Сбросить» — восстанавливает `EditBmp` из `EditOrig` (снимок при
+  открытии) и чистит шейпы/лог.
+- Коммит (`EditCommit`): `CreateCompatibleBitmap` + `EditRender`
+  (BitBlt + все шейпы) → `SnipCommitBitmap`. `EditBmp`/`EditOrig`/
+  снапшоты undo удаляются в `WM_DESTROY`.
 
 ## Горячие клавиши
 

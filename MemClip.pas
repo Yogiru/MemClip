@@ -221,7 +221,14 @@ type
     txtBtnSave,
     txtBtnReset,
     txtSnipWnd,
-    txtSnipAll
+    txtSnipAll,
+    txtToolPen,
+    txtToolLine,
+    txtToolArrow,
+    txtToolRect,
+    txtToolText,
+    txtToolBlur,
+    txtBtnUndo
   );
 
   TClipKind = (ckText, ckImage, ckFiles);
@@ -542,7 +549,14 @@ const
      'Сохранить',
      'Сбросить',
      'Скриншот окна',
-     'Скриншот экрана'),
+     'Скриншот экрана',
+     'Карандаш',
+     'Линия',
+     'Стрелка',
+     'Рамка',
+     'Текст',
+     'Размытие',
+     'Назад'),
 
     // Ukrainian
     ('MemClip',
@@ -629,7 +643,14 @@ const
      'Зберегти',
      'Скинути',
      'Скріншот вікна',
-     'Скріншот екрану'),
+     'Скріншот екрану',
+     'Олівець',
+     'Лінія',
+     'Стрілка',
+     'Рамка',
+     'Текст',
+     'Розмиття',
+     'Назад'),
 
     // Belarusian
     ('MemClip',
@@ -716,7 +737,14 @@ const
      'Захаваць',
      'Скінуць',
      'Скрыншот акна',
-     'Скрыншот экрана'),
+     'Скрыншот экрана',
+     'Аловак',
+     'Лінія',
+     'Стрэлка',
+     'Рамка',
+     'Тэкст',
+     'Размыццё',
+     'Назад'),
 
     // English
     ('MemClip',
@@ -803,7 +831,14 @@ const
      'Save',
      'Reset',
      'Window screenshot',
-     'Full screenshot')
+     'Full screenshot',
+     'Pencil',
+     'Line',
+     'Arrow',
+     'Rect',
+     'Text',
+     'Blur',
+     'Undo')
   );
 
 const
@@ -925,9 +960,6 @@ var
   EditBmp: HBITMAP;
   EditW, EditH: Integer;
   EditScale: Double;
-  EditRects: array of TRect;
-  EditDrag: Boolean;
-  EditA, EditB: TPoint;
 
 constructor TNativeBuffer.Create(capacity: UINT32);
 begin
@@ -3981,27 +4013,276 @@ begin
 end;
 
 { ==================== Screenshot annotation editor ==================== }
-{ Alt при отпускании выделения: простой редактор — тянуть мышью рисует красные
-  рамки; «Копировать»/«Сохранить» коммитят результат, «Сбросить» чистит,
-  Esc/«Отмена» — выход без действий. }
+{ Alt при отпускании выделения: мини-редактор в духе Lightshot —
+  карандаш/линия/стрелка/рамка/текст/размытие, палитра, Ctrl+Z,
+  «Сбросить» возвращает исходник, «Копировать»/«Сохранить» коммитят. }
 
 const
   IDC_ED_OK = 700;
   IDC_ED_SAVE = 701;
   IDC_ED_RESET = 702;
   IDC_ED_CANCEL = 703;
-  EDIT_BTN_ROW = 40;
+  IDC_ED_UNDO = 704;
+  IDC_ED_INPUT = 705;
+  IDC_ED_TOOLS = 710;   // 710..715 — инструменты
+  IDC_ED_COLS = 720;    // 720..725 — цвета
+  EDIT_TB_H = 36;       // высота панели инструментов
+  EDIT_BTN_ROW = 40;    // кнопки снизу
+  TOOL_COUNT = 6;
+  COLOR_COUNT = 6;
+  TOOL_BTN_W = 78;
+  EDIT_FONT_PX = 18;    // размер текстового шейпа в px исходника
+  EDIT_BLUR_SZ = 8;     // блок пикселизации
+  BS_PUSHLIKE_ST = $00001000;
+
+  EDIT_COLORS: array[0..COLOR_COUNT - 1] of COLORREF =
+    ($001E1EE5, $000091F0, $001ECDF5,
+     $0046AA37, $00E6732D, $00191919);
+  TOOL_TEXTS: array[0..TOOL_COUNT - 1] of TTextId =
+    (txtToolPen, txtToolLine, txtToolArrow,
+     txtToolRect, txtToolText, txtToolBlur);
+
+type
+  TEditTool = (etPen, etLine, etArrow, etRect, etText, etBlur);
+  TEditShape = record
+    Tool: TEditTool;
+    Color: COLORREF;
+    A, B: TPoint;              // линия/стрелка/рамка/текст (коорд. исходника)
+    Pts: array of TPoint;      // карандаш
+    Text: WideString;          // текст
+  end;
+  TEditUndo = record
+    Blur: Boolean;             // True — откатить снапшот битмапа
+    Bmp: HBITMAP;
+  end;
 
 var
-  hEdOk, hEdSave, hEdReset, hEdCancel: HWND;
+  hEdOk, hEdSave, hEdReset, hEdCancel, hEdUndo: HWND;
+  hEdTool: array[0..TOOL_COUNT - 1] of HWND;
+  hEdCol: array[0..COLOR_COUNT - 1] of HWND;
+  hEditInput: HWND;
+  OldEditInputProc: LONG;
+  EditTool: TEditTool;
+  EditColorIdx: Integer;
+  EditShapes: array of TEditShape;
+  EditUndoLog: array of TEditUndo;
+  EditCur: TEditShape;
+  EditHasCur: Boolean;
+  EditTextAnchor: TPoint;
+  EditOrig: HBITMAP;
+
+function EditCurColor: COLORREF;
+begin
+  Result := EDIT_COLORS[EditColorIdx];
+end;
+
+procedure EditPushUndoShape;
+begin
+  SetLength(EditUndoLog, Length(EditUndoLog) + 1);
+  EditUndoLog[High(EditUndoLog)].Blur := False;
+  EditUndoLog[High(EditUndoLog)].Bmp := 0;
+end;
+
+procedure EditAddShape(const s: TEditShape);
+begin
+  SetLength(EditShapes, Length(EditShapes) + 1);
+  EditShapes[High(EditShapes)] := s;
+  EditPushUndoShape;
+end;
+
+function EditCopyBmp(src: HBITMAP): HBITMAP;
+var
+  sdc, d1, d2: HDC;
+  o1, o2: HGDIOBJ;
+begin
+  Result := 0;
+  sdc := GetDC(0);
+  Result := CreateCompatibleBitmap(sdc, EditW, EditH);
+  if Result = 0 then
+  begin
+    ReleaseDC(0, sdc);
+    Exit;
+  end;
+  d1 := CreateCompatibleDC(sdc);
+  d2 := CreateCompatibleDC(sdc);
+  o1 := SelectObject(d1, Result);
+  o2 := SelectObject(d2, src);
+  BitBlt(d1, 0, 0, EditW, EditH, d2, 0, 0, SRCCOPY);
+  SelectObject(d1, o1);
+  SelectObject(d2, o2);
+  DeleteDC(d1);
+  DeleteDC(d2);
+  ReleaseDC(0, sdc);
+end;
+
+procedure EditApplyBlur(const r: TRect);
+var
+  sdc: HDC;
+  bi: TBitmapInfo;
+  buf: TBytes;
+  x0, y0, x1, y1, bx, by, px, py, cnt: Integer;
+  sr, sg, sb: LongWord;
+  p: PCardinal;
+  snap: HBITMAP;
+begin
+  x0 := Max(0, r.Left);
+  y0 := Max(0, r.Top);
+  x1 := Min(EditW, r.Right);
+  y1 := Min(EditH, r.Bottom);
+  if (x1 - x0 < 4) or (y1 - y0 < 4) then
+    Exit;
+  snap := EditCopyBmp(EditBmp);
+  if snap = 0 then
+    Exit;
+  sdc := GetDC(0);
+  FillChar(bi, SizeOf(bi), 0);
+  bi.bmiHeader.biSize := SizeOf(TBitmapInfoHeader);
+  bi.bmiHeader.biWidth := EditW;
+  bi.bmiHeader.biHeight := -EditH;
+  bi.bmiHeader.biPlanes := 1;
+  bi.bmiHeader.biBitCount := 32;
+  bi.bmiHeader.biCompression := BI_RGB;
+  SetLength(buf, EditW * EditH * 4);
+  if GetDIBits(sdc, EditBmp, 0, EditH, @buf[0], bi, DIB_RGB_COLORS) = EditH then
+  begin
+    by := y0;
+    while by < y1 do
+    begin
+      bx := x0;
+      while bx < x1 do
+      begin
+        sr := 0;
+        sg := 0;
+        sb := 0;
+        cnt := 0;
+        for py := by to Min(by + EDIT_BLUR_SZ, y1) - 1 do
+          for px := bx to Min(bx + EDIT_BLUR_SZ, x1) - 1 do
+          begin
+            p := PCardinal(@buf[(py * EditW + px) * 4]);
+            sb := sb + (p^ and $FF);
+            sg := sg + ((p^ shr 8) and $FF);
+            sr := sr + ((p^ shr 16) and $FF);
+            Inc(cnt);
+          end;
+        if cnt > 0 then
+        begin
+          sb := sb div cnt;
+          sg := sg div cnt;
+          sr := sr div cnt;
+          for py := by to Min(by + EDIT_BLUR_SZ, y1) - 1 do
+            for px := bx to Min(bx + EDIT_BLUR_SZ, x1) - 1 do
+            begin
+              p := PCardinal(@buf[(py * EditW + px) * 4]);
+              p^ := (p^ and $FF000000) or (sr shl 16) or (sg shl 8) or sb;
+            end;
+        end;
+        Inc(bx, EDIT_BLUR_SZ);
+      end;
+      Inc(by, EDIT_BLUR_SZ);
+    end;
+    SetDIBits(sdc, EditBmp, 0, EditH, @buf[0], bi, DIB_RGB_COLORS);
+    SetLength(EditUndoLog, Length(EditUndoLog) + 1);
+    EditUndoLog[High(EditUndoLog)].Blur := True;
+    EditUndoLog[High(EditUndoLog)].Bmp := snap;
+  end
+  else
+    DeleteObject(snap);
+  ReleaseDC(0, sdc);
+end;
+
+procedure EditDoUndo(hWnd: HWND);
+begin
+  if Length(EditUndoLog) = 0 then
+    Exit;
+  if EditUndoLog[High(EditUndoLog)].Blur then
+  begin
+    if EditBmp <> 0 then
+      DeleteObject(EditBmp);
+    EditBmp := EditUndoLog[High(EditUndoLog)].Bmp;
+  end
+  else
+    SetLength(EditShapes, Length(EditShapes) - 1);
+  SetLength(EditUndoLog, Length(EditUndoLog) - 1);
+  InvalidateRect(hWnd, nil, False);
+end;
+
+procedure EditShapeDraw(dc: HDC; const s: TEditShape; scale: Double; offY: Integer);
+var
+  hp: HPEN;
+  oldp, oldf: HGDIOBJ;
+  i, x1, y1, x2, y2, fw: Integer;
+  ang, len: Double;
+  fnt: HFONT;
+begin
+  if s.Tool = etText then
+  begin
+    if s.Text = '' then
+      Exit;
+    fnt := CreateFontW(-Max(8, Round(EDIT_FONT_PX * scale)), 0, 0, 0,
+      FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+      CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH or FF_DONTCARE,
+      'Segoe UI');
+    oldf := SelectObject(dc, fnt);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, s.Color);
+    TextOutW(dc, Round(s.A.X * scale), offY + Round(s.A.Y * scale),
+      PWideChar(s.Text), Length(s.Text));
+    SelectObject(dc, oldf);
+    DeleteObject(fnt);
+    Exit;
+  end;
+  fw := Max(2, Round(3 * scale));
+  hp := CreatePen(PS_SOLID, fw, s.Color);
+  oldp := SelectObject(dc, hp);
+  case s.Tool of
+    etPen:
+      if Length(s.Pts) > 0 then
+      begin
+        MoveToEx(dc, Round(s.Pts[0].X * scale),
+          offY + Round(s.Pts[0].Y * scale), nil);
+        for i := 1 to High(s.Pts) do
+          LineTo(dc, Round(s.Pts[i].X * scale),
+            offY + Round(s.Pts[i].Y * scale));
+      end;
+    etLine, etArrow:
+      begin
+        x1 := Round(s.A.X * scale);
+        y1 := offY + Round(s.A.Y * scale);
+        x2 := Round(s.B.X * scale);
+        y2 := offY + Round(s.B.Y * scale);
+        MoveToEx(dc, x1, y1, nil);
+        LineTo(dc, x2, y2);
+        if s.Tool = etArrow then
+        begin
+          ang := ArcTan2(y2 - y1, x2 - x1);
+          len := Max(12.0, Min(28.0,
+            Sqrt(Sqr(Int64(x2 - x1)) + Sqr(Int64(y2 - y1))) / 3));
+          MoveToEx(dc, x2, y2, nil);
+          LineTo(dc, x2 - Round(len * Cos(ang - 0.45)),
+            y2 - Round(len * Sin(ang - 0.45)));
+          MoveToEx(dc, x2, y2, nil);
+          LineTo(dc, x2 - Round(len * Cos(ang + 0.45)),
+            y2 - Round(len * Sin(ang + 0.45)));
+        end;
+      end;
+    etRect, etBlur:
+      begin
+        SelectObject(dc, GetStockObject(NULL_BRUSH));
+        Rectangle(dc, Round(Min(s.A.X, s.B.X) * scale),
+          offY + Round(Min(s.A.Y, s.B.Y) * scale),
+          Round(Max(s.A.X, s.B.X) * scale),
+          offY + Round(Max(s.A.Y, s.B.Y) * scale));
+      end;
+  end;
+  SelectObject(dc, oldp);
+  DeleteObject(hp);
+end;
 
 procedure EditRender(outBmp: HBITMAP; w, h: Integer);
 var
   sdc, dc, srcdc: HDC;
   old, oldSrc: HGDIOBJ;
-  br: HBRUSH;
   i: Integer;
-  rr: TRect;
 begin
   sdc := GetDC(0);
   srcdc := CreateCompatibleDC(sdc);
@@ -4010,21 +4291,8 @@ begin
   old := SelectObject(dc, outBmp);
   BitBlt(dc, 0, 0, w, h, srcdc, 0, 0, SRCCOPY);
   SelectObject(srcdc, oldSrc);
-  br := CreateSolidBrush(RGB(230, 30, 30));
-  for i := 0 to High(EditRects) do
-  begin
-    rr := EditRects[i];
-    FrameRect(dc, rr, br);
-    rr := EditRects[i];
-    InflateRect(rr, -1, -1);
-    if (rr.Right - rr.Left > 0) and (rr.Bottom - rr.Top > 0) then
-      FrameRect(dc, rr, br);
-    rr := EditRects[i];
-    InflateRect(rr, -2, -2);
-    if (rr.Right - rr.Left > 0) and (rr.Bottom - rr.Top > 0) then
-      FrameRect(dc, rr, br);
-  end;
-  DeleteObject(br);
+  for i := 0 to High(EditShapes) do
+    EditShapeDraw(dc, EditShapes[i], 1.0, 0);
   SelectObject(dc, old);
   DeleteDC(dc);
   DeleteDC(srcdc);
@@ -4040,57 +4308,133 @@ begin
   dc := CreateCompatibleDC(sdc);
   outBmp := CreateCompatibleBitmap(sdc, EditW, EditH);
   ReleaseDC(0, sdc);
+  DeleteDC(dc);
   if outBmp <> 0 then
   begin
-    DeleteDC(dc);
     EditRender(outBmp, EditW, EditH);
     SnipCommitBitmap(outBmp, EditW, EditH, doSave);
-  end
-  else
-    DeleteDC(dc);
+  end;
 end;
 
 function EditPtToImg(x, y: Integer): TPoint;
 begin
   Result.X := Round(x / EditScale);
-  Result.Y := Round(y / EditScale);
+  Result.Y := Round((y - EDIT_TB_H) / EditScale);
   if Result.X < 0 then Result.X := 0;
   if Result.X >= EditW then Result.X := EditW - 1;
   if Result.Y < 0 then Result.Y := 0;
   if Result.Y >= EditH then Result.Y := EditH - 1;
 end;
 
-procedure EditDrawRect(dc: HDC; const a, b: TPoint);
+procedure EditCloseInput(commit: Boolean);
 var
-  rr: TRect;
-  br: HBRUSH;
-  i: Integer;
+  ws: WideString;
+  n: Integer;
+  sh: TEditShape;
+  inp: HWND;
 begin
-  rr.Left := Round(Min(a.X, b.X) * EditScale);
-  rr.Top := Round(Min(a.Y, b.Y) * EditScale);
-  rr.Right := Round(Max(a.X, b.X) * EditScale);
-  rr.Bottom := Round(Max(a.Y, b.Y) * EditScale);
-  if (rr.Right - rr.Left < 2) or (rr.Bottom - rr.Top < 2) then
+  if hEditInput = 0 then
     Exit;
-  for i := 0 to 2 do
+  inp := hEditInput;
+  if commit then
   begin
-    br := CreateSolidBrush(RGB(230, 30, 30));
-    FrameRect(dc, rr, br);
-    DeleteObject(br);
-    InflateRect(rr, -1, -1);
-    if (rr.Right - rr.Left <= 0) or (rr.Bottom - rr.Top <= 0) then
-      Break;
+    n := GetWindowTextLengthW(inp);
+    SetLength(ws, n);
+    if n > 0 then
+      GetWindowTextW(inp, PWideChar(ws), n + 1);
+    if ws <> '' then
+    begin
+      FillChar(sh, SizeOf(sh), 0);
+      sh.Tool := etText;
+      sh.Color := EditCurColor;
+      sh.A := EditTextAnchor;
+      sh.Text := ws;
+      EditAddShape(sh);
+    end;
   end;
+  hEditInput := 0;
+  DestroyWindow(inp);
+end;
+
+function EditInputProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall;
+begin
+  if uMsg = WM_KEYDOWN then
+  begin
+    if wParam = VK_RETURN then
+    begin
+      EditCloseInput(True);
+      Exit(0);
+    end;
+    if wParam = VK_ESCAPE then
+    begin
+      EditCloseInput(False);
+      Exit(0);
+    end;
+  end;
+  Result := CallWindowProc(WNDPROC(OldEditInputProc), hWnd, uMsg, wParam, lParam);
+end;
+
+procedure EditOpenTextInput(hWnd: HWND; imgPt: TPoint);
+var
+  x, y: Integer;
+begin
+  EditCloseInput(True);
+  EditTextAnchor := imgPt;
+  x := Round(imgPt.X * EditScale);
+  y := EDIT_TB_H + Round(imgPt.Y * EditScale);
+  hEditInput := CreateWindowExW(WS_EX_CLIENTEDGE, 'EDIT', '',
+    WS_CHILD or WS_VISIBLE or ES_AUTOHSCROLL,
+    x, y, 160, 26, hWnd, HMENU(IDC_ED_INPUT), HInstance, nil);
+  if hEditInput = 0 then
+    Exit;
+  SendMessage(hEditInput, WM_SETFONT, hPopupFont, 1);
+  OldEditInputProc := SetWindowLongW(hEditInput, GWL_WNDPROC,
+    LONG(@EditInputProc));
+  SetFocus(hEditInput);
+end;
+
+procedure EditSelectTool(hWnd: HWND; idx: Integer);
+var
+  j: Integer;
+begin
+  if (idx < 0) or (idx >= TOOL_COUNT) then
+    Exit;
+  EditCloseInput(True);
+  EditTool := TEditTool(idx);
+  for j := 0 to TOOL_COUNT - 1 do
+    SendMessageW(hEdTool[j], BM_SETCHECK, Ord(j = idx), 0);
+end;
+
+procedure EditReset(hWnd: HWND);
+begin
+  EditCloseInput(False);
+  SetLength(EditShapes, 0);
+  while Length(EditUndoLog) > 0 do
+  begin
+    if EditUndoLog[High(EditUndoLog)].Bmp <> 0 then
+      DeleteObject(EditUndoLog[High(EditUndoLog)].Bmp);
+    SetLength(EditUndoLog, Length(EditUndoLog) - 1);
+  end;
+  if (EditBmp <> 0) and (EditOrig <> 0) then
+  begin
+    DeleteObject(EditBmp);
+    EditBmp := EditCopyBmp(EditOrig);
+  end;
+  EditHasCur := False;
+  InvalidateRect(hWnd, nil, False);
 end;
 
 function EditWndProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall;
 var
-  rc: TRect;
+  rc, rcImg: TRect;
   ps: TPaintStruct;
   dc, mdc: HDC;
   old: HGDIOBJ;
   pt: TPoint;
-  i, dw, dh: Integer;
+  i, dw, dh, cid: Integer;
+  dis: PDRAWITEMSTRUCT;
+  br: HBRUSH;
+  sh: TEditShape;
 begin
   Result := 0;
   case uMsg of
@@ -4098,23 +4442,73 @@ begin
       begin
         dw := Round(EditW * EditScale);
         dh := Round(EditH * EditScale);
+        for i := 0 to TOOL_COUNT - 1 do
+        begin
+          hEdTool[i] := CreateWindowExW(0, 'BUTTON',
+            PWideChar(AsWide(GetText(TOOL_TEXTS[i]))),
+            WS_CHILD or WS_VISIBLE or WS_TABSTOP or
+            BS_PUSHLIKE_ST or BS_AUTOCHECKBOX,
+            6 + i * (TOOL_BTN_W + 4), 4, TOOL_BTN_W, 26,
+            hWnd, HMENU(IDC_ED_TOOLS + i), HInstance, nil);
+          SendMessage(hEdTool[i], WM_SETFONT, hPopupFont, 1);
+        end;
+        for i := 0 to COLOR_COUNT - 1 do
+        begin
+          hEdCol[i] := CreateWindowExW(0, 'BUTTON', '',
+            WS_CHILD or WS_VISIBLE or BS_OWNERDRAW,
+            6 + TOOL_COUNT * (TOOL_BTN_W + 4) + 10 + i * 28, 6, 24, 22,
+            hWnd, HMENU(IDC_ED_COLS + i), HInstance, nil);
+        end;
         hEdOk := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnCopy))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
-          8, dh + 6, 100, 28, hWnd, HMENU(IDC_ED_OK), HInstance, nil);
+          8, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_OK), HInstance, nil);
         hEdSave := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnSave))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
-          112, dh + 6, 100, 28, hWnd, HMENU(IDC_ED_SAVE), HInstance, nil);
+          110, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_SAVE), HInstance, nil);
+        hEdUndo := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnUndo))),
+          WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
+          212, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_UNDO), HInstance, nil);
         hEdReset := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnReset))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
-          216, dh + 6, 100, 28, hWnd, HMENU(IDC_ED_RESET), HInstance, nil);
+          314, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_RESET), HInstance, nil);
         hEdCancel := CreateWindowExW(0, 'BUTTON', PWideChar(AsWide(GetText(txtBtnCancel))),
           WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_PUSHBUTTON,
-          dw - 108, dh + 6, 100, 28, hWnd, HMENU(IDC_ED_CANCEL), HInstance, nil);
+          dw - 104, EDIT_TB_H + dh + 6, 96, 28, hWnd, HMENU(IDC_ED_CANCEL), HInstance, nil);
         SendMessage(hEdOk, WM_SETFONT, hPopupFont, 1);
         SendMessage(hEdSave, WM_SETFONT, hPopupFont, 1);
+        SendMessage(hEdUndo, WM_SETFONT, hPopupFont, 1);
         SendMessage(hEdReset, WM_SETFONT, hPopupFont, 1);
         SendMessage(hEdCancel, WM_SETFONT, hPopupFont, 1);
+        EditSelectTool(hWnd, Ord(EditTool));
         hEditWnd := hWnd;
+      end;
+    WM_DRAWITEM:
+      begin
+        dis := PDRAWITEMSTRUCT(lParam);
+        if (dis^.CtlType = ODT_BUTTON) and
+           (dis^.CtlID >= IDC_ED_COLS) and
+           (dis^.CtlID < IDC_ED_COLS + COLOR_COUNT) then
+        begin
+          cid := dis^.CtlID - IDC_ED_COLS;
+          br := CreateSolidBrush(EDIT_COLORS[cid]);
+          FillRect(dis^.hDC, dis^.rcItem, br);
+          DeleteObject(br);
+          if cid = EditColorIdx then
+          begin
+            br := GetStockObject(BLACK_BRUSH);
+            FrameRect(dis^.hDC, dis^.rcItem, br);
+            rc := dis^.rcItem;
+            InflateRect(rc, -1, -1);
+            FrameRect(dis^.hDC, rc, br);
+          end
+          else
+            FrameRect(dis^.hDC, dis^.rcItem,
+              GetSysColorBrush(COLOR_GRAYTEXT));
+          if (dis^.itemState and ODS_SELECTED) <> 0 then
+            DrawEdge(dis^.hDC, dis^.rcItem, EDGE_SUNKEN, BF_RECT);
+        end
+        else
+          Result := DefWindowProcW(hWnd, uMsg, wParam, lParam);
       end;
     WM_PAINT:
       begin
@@ -4126,80 +4520,137 @@ begin
         old := SelectObject(mdc, EditBmp);
         SetStretchBltMode(dc, HALFTONE);
         SetBrushOrgEx(dc, 0, 0, nil);
-        StretchBlt(dc, 0, 0, dw, dh, mdc, 0, 0, EditW, EditH, SRCCOPY);
+        StretchBlt(dc, 0, EDIT_TB_H, dw, dh, mdc, 0, 0, EditW, EditH, SRCCOPY);
         SelectObject(mdc, old);
         DeleteDC(mdc);
-        for i := 0 to High(EditRects) do
-          EditDrawRect(dc, Point(EditRects[i].Left, EditRects[i].Top),
-            Point(EditRects[i].Right, EditRects[i].Bottom));
-        if EditDrag then
-          EditDrawRect(dc, EditA, EditB);
-        if dh + EDIT_BTN_ROW < rc.Bottom then
-        begin
-          rc.Top := dh + EDIT_BTN_ROW;
-          FillRect(dc, rc, GetSysColorBrush(COLOR_BTNFACE));
-        end;
+        for i := 0 to High(EditShapes) do
+          EditShapeDraw(dc, EditShapes[i], EditScale, EDIT_TB_H);
+        if EditHasCur then
+          EditShapeDraw(dc, EditCur, EditScale, EDIT_TB_H);
+        rcImg := Rect(0, EDIT_TB_H + dh, rc.Right, rc.Bottom);
+        if rcImg.Top < rc.Bottom then
+          FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
         EndPaint(hWnd, ps);
       end;
     WM_LBUTTONDOWN:
       begin
         pt.X := SmallInt(LongInt(lParam and $FFFF));
         pt.Y := SmallInt(LongInt(lParam shr 16));
-        if pt.Y < Round(EditH * EditScale) then
+        if (pt.Y >= EDIT_TB_H) and
+           (pt.Y < EDIT_TB_H + Round(EditH * EditScale)) then
         begin
-          EditDrag := True;
-          EditA := EditPtToImg(pt.X, pt.Y);
-          EditB := EditA;
-          SetCapture(hWnd);
+          if EditTool = etText then
+            EditOpenTextInput(hWnd, EditPtToImg(pt.X, pt.Y))
+          else
+          begin
+            EditCloseInput(True);
+            FillChar(EditCur, SizeOf(EditCur), 0);
+            EditCur.Tool := EditTool;
+            EditCur.Color := EditCurColor;
+            EditCur.A := EditPtToImg(pt.X, pt.Y);
+            EditCur.B := EditCur.A;
+            if EditTool = etPen then
+            begin
+              SetLength(EditCur.Pts, 1);
+              EditCur.Pts[0] := EditCur.A;
+            end;
+            EditHasCur := True;
+            SetCapture(hWnd);
+          end;
         end;
       end;
     WM_MOUSEMOVE:
-      if EditDrag then
+      if EditHasCur then
       begin
         pt.X := SmallInt(LongInt(lParam and $FFFF));
         pt.Y := SmallInt(LongInt(lParam shr 16));
-        EditB := EditPtToImg(pt.X, pt.Y);
+        pt := EditPtToImg(pt.X, pt.Y);
+        if EditCur.Tool = etPen then
+        begin
+          if (Abs(pt.X - EditCur.Pts[High(EditCur.Pts)].X) > 1) or
+             (Abs(pt.Y - EditCur.Pts[High(EditCur.Pts)].Y) > 1) then
+          begin
+            SetLength(EditCur.Pts, Length(EditCur.Pts) + 1);
+            EditCur.Pts[High(EditCur.Pts)] := pt;
+          end;
+        end
+        else
+          EditCur.B := pt;
         InvalidateRect(hWnd, nil, False);
       end;
     WM_LBUTTONUP:
-      if EditDrag then
+      if EditHasCur then
       begin
-        EditDrag := False;
+        EditHasCur := False;
         ReleaseCapture;
         pt.X := SmallInt(LongInt(lParam and $FFFF));
         pt.Y := SmallInt(LongInt(lParam shr 16));
-        EditB := EditPtToImg(pt.X, pt.Y);
-        if (Abs(EditB.X - EditA.X) > 3) and (Abs(EditB.Y - EditA.Y) > 3) then
-        begin
-          SetLength(EditRects, Length(EditRects) + 1);
-          EditRects[High(EditRects)] := Rect(Min(EditA.X, EditB.X),
-            Min(EditA.Y, EditB.Y), Max(EditA.X, EditB.X), Max(EditA.Y, EditB.Y));
+        pt := EditPtToImg(pt.X, pt.Y);
+        case EditCur.Tool of
+          etPen:
+            if Length(EditCur.Pts) > 1 then
+              EditAddShape(EditCur);
+          etLine, etArrow, etRect:
+            begin
+              EditCur.B := pt;
+              if (Abs(EditCur.B.X - EditCur.A.X) > 3) or
+                 (Abs(EditCur.B.Y - EditCur.A.Y) > 3) then
+                EditAddShape(EditCur);
+            end;
+          etBlur:
+            begin
+              EditCur.B := pt;
+              EditApplyBlur(Rect(Min(EditCur.A.X, EditCur.B.X),
+                Min(EditCur.A.Y, EditCur.B.Y),
+                Max(EditCur.A.X, EditCur.B.X),
+                Max(EditCur.A.Y, EditCur.B.Y)));
+            end;
         end;
+        SetLength(EditCur.Pts, 0);
         InvalidateRect(hWnd, nil, False);
       end;
     WM_COMMAND:
-      case LoWord(wParam) of
-        IDC_ED_OK:
-          begin
-            EditCommit(False);
-            DestroyWindow(hWnd);
+      begin
+        cid := wParam and $FFFF;
+        if (cid >= IDC_ED_TOOLS) and (cid < IDC_ED_TOOLS + TOOL_COUNT) then
+          EditSelectTool(hWnd, cid - IDC_ED_TOOLS)
+        else if (cid >= IDC_ED_COLS) and (cid < IDC_ED_COLS + COLOR_COUNT) then
+        begin
+          EditColorIdx := cid - IDC_ED_COLS;
+          for i := 0 to COLOR_COUNT - 1 do
+            InvalidateRect(hEdCol[i], nil, False);
+        end
+        else if (cid = IDC_ED_INPUT) and ((wParam shr 16) = EN_KILLFOCUS) then
+          EditCloseInput(True)
+        else
+          case cid of
+            IDC_ED_OK:
+              begin
+                EditCloseInput(True);
+                EditCommit(False);
+                DestroyWindow(hWnd);
+              end;
+            IDC_ED_SAVE:
+              begin
+                EditCloseInput(True);
+                EditCommit(True);
+                DestroyWindow(hWnd);
+              end;
+            IDC_ED_UNDO:
+              EditDoUndo(hWnd);
+            IDC_ED_RESET:
+              EditReset(hWnd);
+            IDC_ED_CANCEL:
+              DestroyWindow(hWnd);
           end;
-        IDC_ED_SAVE:
-          begin
-            EditCommit(True);
-            DestroyWindow(hWnd);
-          end;
-        IDC_ED_RESET:
-          begin
-            SetLength(EditRects, 0);
-            InvalidateRect(hWnd, nil, False);
-          end;
-        IDC_ED_CANCEL:
-          DestroyWindow(hWnd);
       end;
     WM_KEYDOWN:
-      if wParam = VK_ESCAPE then
-        DestroyWindow(hWnd);
+      begin
+        if wParam = VK_ESCAPE then
+          DestroyWindow(hWnd)
+        else if (wParam = Ord('Z')) and (GetKeyState(VK_CONTROL) < 0) then
+          EditDoUndo(hWnd);
+      end;
     WM_DESTROY:
       begin
         hEditWnd := 0;
@@ -4207,11 +4658,26 @@ begin
         hEdSave := 0;
         hEdReset := 0;
         hEdCancel := 0;
+        hEdUndo := 0;
+        hEditInput := 0;
         if EditBmp <> 0 then
         begin
           DeleteObject(EditBmp);
           EditBmp := 0;
         end;
+        if EditOrig <> 0 then
+        begin
+          DeleteObject(EditOrig);
+          EditOrig := 0;
+        end;
+        while Length(EditUndoLog) > 0 do
+        begin
+          if EditUndoLog[High(EditUndoLog)].Bmp <> 0 then
+            DeleteObject(EditUndoLog[High(EditUndoLog)].Bmp);
+          SetLength(EditUndoLog, Length(EditUndoLog) - 1);
+        end;
+        SetLength(EditShapes, 0);
+        EditHasCur := False;
       end;
   else
     Result := DefWindowProcW(hWnd, uMsg, wParam, lParam);
@@ -4221,7 +4687,7 @@ end;
 procedure ShowSnipEditor(bmp: HBITMAP; w, h: Integer);
 var
   wc: TWndClassW;
-  sw, sh, dw, dh: Integer;
+  sw, sh, dw, dh, minW: Integer;
   msg: TMsg;
   rc: TRect;
   exStyle: DWORD;
@@ -4242,21 +4708,29 @@ begin
   EditBmp := bmp;
   EditW := w;
   EditH := h;
-  SetLength(EditRects, 0);
-  EditDrag := False;
+  EditOrig := 0;
+  SetLength(EditShapes, 0);
+  SetLength(EditUndoLog, 0);
+  EditHasCur := False;
+  EditTool := etPen;
+  EditColorIdx := 0;
+  hEditInput := 0;
   sw := GetSystemMetrics(SM_CXSCREEN);
   sh := GetSystemMetrics(SM_CYSCREEN);
   EditScale := 1.0;
   if w > sw - 80 then
     EditScale := Min(EditScale, (sw - 80) / w);
-  if h > sh - 160 then
-    EditScale := Min(EditScale, (sh - 160) / h);
+  if h > sh - 200 then
+    EditScale := Min(EditScale, (sh - 200) / h);
   if EditScale <= 0 then
     EditScale := 0.1;
   dw := Round(w * EditScale);
-  dh := Round(h * EditScale) + EDIT_BTN_ROW;
+  dh := Round(h * EditScale);
+  minW := 6 + TOOL_COUNT * (TOOL_BTN_W + 4) + 10 + COLOR_COUNT * 28 + 10;
+  if dw < minW then
+    dw := minW;
   exStyle := WS_EX_TOPMOST or WS_EX_TOOLWINDOW;
-  rc := Rect(0, 0, dw + 16, dh + 38);
+  rc := Rect(0, 0, dw + 16, EDIT_TB_H + dh + EDIT_BTN_ROW + 38);
   AdjustWindowRectEx(rc, WS_POPUP or WS_CAPTION, False, exStyle);
   hEditWnd := CreateWindowExW(exStyle, PWideChar(EditClassName),
     PWideChar(AsWide(GetText(txtEditTitle))),
@@ -4269,6 +4743,7 @@ begin
     DeleteObject(bmp);
     Exit;
   end;
+  EditOrig := EditCopyBmp(EditBmp);
   SetForegroundWindow(hEditWnd);
   SetFocus(hEditWnd);
   while IsWindow(hEditWnd) and GetMessage(msg, 0, 0, 0) do
@@ -4277,6 +4752,7 @@ begin
     DestroyWindow(hEditWnd);
   hEditWnd := 0;
 end;
+
 
 procedure SnipWindow;
 var
