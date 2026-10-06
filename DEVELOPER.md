@@ -322,8 +322,12 @@ GDI+→`GetDIBits` top-down) и прогоняет `OcrPixelsToText`; общий
 
 ### Радио (MFPlay / Media Foundation)
 
-- Подменю `Радио` (станции `IDM_RADIO_BASE+i`, `Стоп`, `Тише`/`Громче`).
-  Воспроизведение через `MFPCreateMediaPlayer` (mfplay.dll): возвращается
+- Подменю `Радио` (станции `IDM_RADIO_BASE+i`, `Стоп`, `Тише`/`Громче`,
+  чекбокс `IDM_RADIO_EN`). Радио **выключено по умолчанию**
+  (`[radio] enabled=0`): список станций читается только при включении,
+  а `mfplay.dll` подгружается лениво `LoadLibraryW`+`GetProcAddress`
+  при первом `RadioPlay` — нулевая цена при старте.
+  Воспроизведение через `MFPCreateMediaPlayer`: возвращается
   мгновенно, подключение к потоку идёт асинхронно — UI не блокируется.
   `IMFPMediaPlayer` объявлен вручную по vtable mfplay.h (IUnknown-based,
   все 33 метода в точном порядке — только `Play`/`Stop`/`SetVolume`/

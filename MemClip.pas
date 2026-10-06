@@ -67,6 +67,7 @@ const
   IDM_RADIO_STOP = 172;
   IDM_RADIO_VOLDN = 173;
   IDM_RADIO_VOLUP = 174;
+  IDM_RADIO_EN = 175;
 
   RADIO_BUILTIN = 4;
   RADIO_MAX = 32;
@@ -260,6 +261,7 @@ type
     txtUpdateLatest,
     txtUpdateErr,
     txtRadio,
+    txtRadioEnable,
     txtRadioStop,
     txtRadioOn,
     txtRadioFail,
@@ -653,6 +655,7 @@ const
      'У вас последняя версия',
      'Не удалось проверить обновления',
      'Радио',
+     'Включить радио',
      'Стоп',
      'Радио: %s',
      'Не удалось запустить поток',
@@ -756,6 +759,7 @@ const
      'У вас остання версія',
      'Не вдалося перевірити оновлення',
      'Радіо',
+     'Увімкнути радіо',
      'Стоп',
      'Радіо: %s',
      'Не вдалося запустити потік',
@@ -859,6 +863,7 @@ const
      'У вас апошняя версія',
      'Не ўдалося праверыць абнаўленні',
      'Радыё',
+     'Уключыць радыё',
      'Стоп',
      'Радыё: %s',
      'Не ўдалося запусціць паток',
@@ -962,6 +967,7 @@ const
      'You have the latest version',
      'Could not check for updates',
      'Radio',
+     'Enable radio',
      'Stop',
      'Radio: %s',
      'Could not start the stream',
@@ -1014,9 +1020,10 @@ function InternetReadFileMc(h: Pointer; buf: Pointer; num: DWORD;
   out read: DWORD): BOOL; stdcall; external 'wininet.dll' name 'InternetReadFile';
 function InternetCloseHandleMc(h: Pointer): BOOL; stdcall; external 'wininet.dll' name 'InternetCloseHandle';
 
-function MFPCreateMediaPlayer(pwszURL: PWideChar; fStartPlayback: BOOL;
-  creationOptions: DWORD; pCallback: Pointer; hWnd: HWND;
-  out ppMediaPlayer: IMFPMediaPlayer): HRESULT; stdcall; external 'mfplay.dll';
+type
+  TMfpCreateFn = function(pwszURL: PWideChar; fStartPlayback: BOOL;
+    creationOptions: DWORD; pCallback: Pointer; hWnd: HWND;
+    out ppMediaPlayer: IMFPMediaPlayer): HRESULT; stdcall;
 
 function AddClipboardFormatListener(hwnd: HWND): BOOL; stdcall; external 'user32.dll' name 'AddClipboardFormatListener';
 function RoInitialize(initType: Longint): HRESULT; stdcall; external 'combase.dll';
@@ -1118,6 +1125,9 @@ var
   OcrIdxPending: Longint;
   UpdateChecking: Boolean;
   gRadioPlayer: IMFPMediaPlayer;
+  RadioEnabled: Boolean;
+  hMfpDll: THandle;
+  pfnMfpCreate: TMfpCreateFn;
   RadioStation: Integer;
   RadioVolume: Integer;
   RadioNames: array of WideString;
@@ -3966,7 +3976,18 @@ begin
   if (idx < 0) or (idx >= RadioStationCount) then
     Exit;
   RadioStop;
-  hr := MFPCreateMediaPlayer(PWideChar(RadioUrls[idx]), True, 0, nil,
+  if hMfpDll = 0 then
+  begin
+    hMfpDll := LoadLibraryW('mfplay.dll');
+    if hMfpDll <> 0 then
+      Pointer(pfnMfpCreate) := GetProcAddress(hMfpDll, 'MFPCreateMediaPlayer');
+  end;
+  if not Assigned(pfnMfpCreate) then
+  begin
+    QueueInfo(GetText(txtRadioFail));
+    Exit;
+  end;
+  hr := pfnMfpCreate(PWideChar(RadioUrls[idx]), True, 0, nil,
     hMainWnd, gRadioPlayer);
   if (hr = S_OK) and (gRadioPlayer <> nil) then
   begin
@@ -3995,6 +4016,16 @@ var
   buf: array[0..2047] of WideChar;
   s, key: WideString;
 begin
+  RadioEnabled := GetPrivateProfileIntW(PWideChar(WideString('radio')),
+    PWideChar(WideString('enabled')), 0, p) <> 0;
+  RadioVolume := GetPrivateProfileIntW(PWideChar(WideString('radio')),
+    PWideChar(WideString('volume')), 70, p);
+  if RadioVolume < 0 then
+    RadioVolume := 0;
+  if RadioVolume > 100 then
+    RadioVolume := 100;
+  if not RadioEnabled then
+    Exit;
   SetLength(RadioNames, RADIO_BUILTIN);
   SetLength(RadioUrls, RADIO_BUILTIN);
   for i := 0 to RADIO_BUILTIN - 1 do
@@ -4020,12 +4051,6 @@ begin
     RadioUrls[cnt] := Copy(s, bar + 1, Length(s) - bar);
     Inc(cnt);
   end;
-  RadioVolume := GetPrivateProfileIntW(PWideChar(WideString('radio')),
-    PWideChar(WideString('volume')), 70, p);
-  if RadioVolume < 0 then
-    RadioVolume := 0;
-  if RadioVolume > 100 then
-    RadioVolume := 100;
 end;
 
 function UiaElementRect(pt: TPoint; out rc: TRect): Boolean;
@@ -5939,6 +5964,8 @@ begin
     PWideChar(AsWide(IntToStr(ClipHistoryMax))), p);
   WritePrivateProfileStringW(PWideChar(WideString('clipboard')), PWideChar(WideString('keep_days')),
     PWideChar(AsWide(IntToStr(ClipKeepDays))), p);
+  WritePrivateProfileStringW(PWideChar(WideString('radio')), PWideChar(WideString('enabled')),
+    PWideChar(AsWide(IntToStr(Ord(RadioEnabled)))), p);
   WritePrivateProfileStringW(PWideChar(WideString('radio')), PWideChar(WideString('volume')),
     PWideChar(AsWide(IntToStr(RadioVolume))), p);
 end;
@@ -6409,18 +6436,26 @@ begin
   AppendMenuW(TrayMenu, MF_STRING, IDM_ICONCACHE, PWideChar(AsWide(GetText(txtIconCache))));
   AppendMenuW(TrayMenu, MF_STRING, IDM_UPDATE, PWideChar(AsWide(GetText(txtUpdate))));
   RadioMenu := CreatePopupMenu;
-  for i := 0 to RadioStationCount - 1 do
+  uFlags := MF_STRING;
+  if RadioEnabled then
+    uFlags := uFlags or MF_CHECKED;
+  AppendMenuW(RadioMenu, uFlags, IDM_RADIO_EN, PWideChar(AsWide(GetText(txtRadioEnable))));
+  if RadioEnabled then
   begin
-    uFlags := MF_STRING;
-    if RadioStation = i then
-      uFlags := uFlags or MF_CHECKED;
-    AppendMenuW(RadioMenu, uFlags, IDM_RADIO_BASE + i, PWideChar(RadioNames[i]));
+    AppendMenuW(RadioMenu, MF_SEPARATOR, 0, nil);
+    for i := 0 to RadioStationCount - 1 do
+    begin
+      uFlags := MF_STRING;
+      if RadioStation = i then
+        uFlags := uFlags or MF_CHECKED;
+      AppendMenuW(RadioMenu, uFlags, IDM_RADIO_BASE + i, PWideChar(RadioNames[i]));
+    end;
+    AppendMenuW(RadioMenu, MF_SEPARATOR, 0, nil);
+    AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_STOP, PWideChar(AsWide(GetText(txtRadioStop))));
+    AppendMenuW(RadioMenu, MF_SEPARATOR, 0, nil);
+    AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_VOLDN, PWideChar(AsWide(GetText(txtVolDn))));
+    AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_VOLUP, PWideChar(AsWide(GetText(txtVolUp))));
   end;
-  AppendMenuW(RadioMenu, MF_SEPARATOR, 0, nil);
-  AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_STOP, PWideChar(AsWide(GetText(txtRadioStop))));
-  AppendMenuW(RadioMenu, MF_SEPARATOR, 0, nil);
-  AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_VOLDN, PWideChar(AsWide(GetText(txtVolDn))));
-  AppendMenuW(RadioMenu, MF_STRING, IDM_RADIO_VOLUP, PWideChar(AsWide(GetText(txtVolUp))));
   AppendMenuW(TrayMenu, MF_POPUP, UINT(RadioMenu), PWideChar(AsWide(GetText(txtRadio))));
 
   hk1 := AsWide(GetText(txtHkClip)) + '   ' + HotkeyText(HotkeyClipMods, HotkeyClipVk);
@@ -6676,6 +6711,19 @@ begin
           IDM_SNIP: ShowSnip;
           IDM_UPDATE:
             CheckUpdates;
+          IDM_RADIO_EN:
+            begin
+              RadioEnabled := not RadioEnabled;
+              if not RadioEnabled then
+              begin
+                RadioStop;
+                SetLength(RadioNames, 0);
+                SetLength(RadioUrls, 0);
+              end;
+              SaveConfig;
+              if RadioEnabled then
+                LoadRadioCfg(PWideChar(IniPath));
+            end;
           IDM_RADIO_STOP:
             RadioStop;
           IDM_RADIO_VOLDN:
