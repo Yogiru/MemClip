@@ -58,6 +58,8 @@ MouseHookThread — поток с WH_MOUSE_LL хуком (Ctrl+средний к
 | `WM_CLEANUP_DONE` (WM_USER+2) | CleanupThread → главное окно (free before/after в wParam/lParam) |
 | `WM_GRAB_CLICK` (WM_USER+3) | MouseHookThread → главное окно; wParam: 1=текст (Ctrl+MMB), 2=URL (Ctrl+Alt+MMB), 3=OCR (Alt+MMB) |
 | `VIEW_REFRESH` (WM_APP+5) | главное окно → `MemClipViewer`: пересобрать список при изменении истории |
+| `WM_OCRIDX_DONE` (WM_APP+6) | OcrIdxThread → главное окно; lParam = `POcrIdxJob` (текст OCR для записи истории) |
+| `WM_UPDATE_DONE` (WM_APP+7) | UpdThread → главное окно; lParam = `PUpdJob` (результат проверки обновлений) |
 | `TaskbarCreated` | Пересоздание трей-иконки после рестарта Explorer |
 
 ### Таймеры
@@ -112,6 +114,7 @@ end;
 TClipEntry = record
   Kind: TClipKind;        // ckText | ckImage | ckFiles — только для подписи в меню
   Text: WideString;       // текст записи / подпись
+  OcrText: WideString;    // OCR-индекс картинки (только в памяти — поиск в viewer'е)
   ImgW, ImgH: Integer;    // размеры картинки (парсятся из BITMAPINFOHEADER DIB)
   Pinned: Boolean;        // закреплённая запись — не вытесняется
   Time: QWord;            // GetTickCount64 захвата — для склейки копий
@@ -220,7 +223,11 @@ WM_CLIPBOARDUPDATE → TIMER_CLIPCAPTURE (300 мс) → CaptureClipboard
   не бипало), кнопка «Удалить» и ПКМ-контекстное меню
   (`WM_CONTEXTMENU` → `TrackPopupMenuCmd` — собственный импорт с
   возвратом UINT, т.к. RTL-обёртка возвращает BOOL) → `RemoveClipEntry`;
-  pinned-записи удаляются только явной командой.
+  pinned-записи удаляются только явной командой. В меню также
+  «Сохранить как…» → `EntrySaveAs`: PNG через `EntryPngBytes`
+  (готовый PNG-формат или `PngFromDib`), текст/файлы — UTF-8+BOM;
+  диалог `GetSaveFileNameW` (объявлен вручную — его нет в RTL),
+  запись через `CreateFileW`+`THandleStream` (Unicode-пути).
 - `ViewIdx[]` — отображение строки списка → индекс в `ClipHistory`
   (фильтрация по `Text`/подписи, case-insensitive);
   `ViewThumbs[]` — ленивый кэш миниатюр по индексу записи
@@ -298,6 +305,23 @@ vtable точный. `IInspectable` добавляет `GetIids`/`GetRuntimeClas
 пакетов (`AvailableRecognizerLanguages` = 0) движок не создаётся —
 проверяется один раз и кешируется в `OcrChecked`.
 
+**OCR-индекс истории**: при добавлении картинки в историю (`ClipAdd`)
+`QueueOcrIndex` запускает `OcrIdxThread` (не более 3 одновременно —
+счётчик `OcrIdxPending`). Поток декодирует PNG→BGRA (`PngToBgra`,
+GDI+→`GetDIBits` top-down) и прогоняет `OcrPixelsToText`; общий движок
+`gOcrEngine` защищён `OcrCs` (WinRT-объекты agile, но CS страхует от
+параллельного вызова из grab-пути). Результат приходит в главное окно
+`WM_OCRIDX_DONE` (ключ = `Time`+`StampUtc` записи) и пишется в
+`OcrText` — участвует в фильтре `ViewRebuildFilter`. В `MCL4` не
+сериализуется: индекс живёт только в памяти сессии.
+
+**Проверка обновлений**: `IDM_UPDATE` → `CheckUpdates` → `UpdThread`
+(WinInet `InternetOpenW`/`InternetOpenUrlW`/`InternetReadFile`, TLS на
+стороне ОС) → GitHub API `releases/latest` → `WM_UPDATE_DONE` →
+сравнение `tag_name` с `APP_VERSION` (`VersionNewer`, числовое по
+компонентам) → `MessageBox` + `ShellExecuteW` на `html_url` релиза.
+Ничего не скачивается и не ставится автоматически.
+
 ### Диалог захвата (`ShowGrabDialog`, класс `MemClipGrab`)
 
 - Окно 480×200 у курсора, светло-оранжевый фон `RGB(255,206,163)`,
@@ -316,9 +340,14 @@ vtable точный. `IInspectable` добавляет `GetIids`/`GetRuntimeClas
 - При drag'е `SetWindowRgn` вырезает «дырку» под выделением
   (`CreateRectRgn` + `CombineRgn(RGN_DIFF)`, внутренняя рамка 2px) —
   область видна яркой; в `WM_PAINT` рисуется белое кольцо и размер WxH.
-- `WM_LBUTTONUP` → `DestroyWindow`, `Sleep(120)` на перерисовку,
-  `SnipFinish`: `CreateDIBSection`(32bpp top-down) + `BitBlt` со screen DC.
-- Режимы по модификаторам при отпускании: обычный → `ShowSnipEditor`
+- `WM_LBUTTONUP` переводит оверлей в режим подгонки (`SnipAdjusting`):
+  рамка хранится в `SnipSel`, drag внутри — перемещение (`SnipMoving`),
+  за края ±6 px — resize по маске `SnipEdge` (1/2/4/8 = L/T/R/B),
+  стрелки — nudge 1 px (Shift — 10). Клик вне рамки начинает новое
+  выделение. `Enter` коммитит с модификаторами (`SnipModeFromKeys`),
+  `DestroyWindow` → `Sleep(120)` → `SnipFinish`:
+  `CreateDIBSection`(32bpp top-down) + `BitBlt` со screen DC.
+- Режимы по модификаторам при Enter: обычный → `ShowSnipEditor`
   (разметка); Alt → сразу `CF_BITMAP` + `PNG` (GDI+ `GdipSaveImageToStream`)
   в буфер; Ctrl → `OcrPixelsToText` → `ShowGrabDialog`; Shift →
   `GdipSaveImageToFile` в `screenshots\clip_yyyymmdd_hhnnss.png` +
@@ -326,7 +355,9 @@ vtable точный. `IInspectable` добавляет `GetIids`/`GetRuntimeClas
   в `SnipCommitBitmap(bmp, w, h, doSave)`.
 - `SnipWindow`/`SnipAll` (`HOTKEY_SNIPWND`/`HOTKEY_SNIPALL`) — снимок
   `GetWindowRect(GetForegroundWindow)` / виртуального экрана напрямую
-  через `SnipFinish` без оверлея.
+  через `SnipFinish` без оверлея; mode 3 (редактор) по умолчанию,
+  mode 0 при зажатом Shift. `HOTKEY_SNIPLAST` повторяет `SnipLastScr`
+  (последняя область, запоминается в `SnipFinish`) режимом 0.
 - Пока `hSnipWnd <> 0` или `hEditWnd <> 0`, `MouseHookProc` пропускает
   жесты MMB.
 - Модальный цикл `GetMessage/DispatchMessage` как у viewer'а —
@@ -387,11 +418,14 @@ snipwnd_mods=3
 snipwnd_vk=65   ; 'A'
 snipall_mods=3
 snipall_vk=70   ; 'F'
+sniplast_mods=7 ; Ctrl+Alt+Shift
+sniplast_vk=83  ; 'S'
 
 [clipboard]
 merge=0                           ; склейка последовательных текстовых копий
 exclude=keepass.exe;bitwarden.exe ; процессы, чей буфер не записывается
 max=30                            ; размер истории без pinned (5–256)
+keep_days=0                       ; автоудаление записей старше N дней (0 — выкл)
 
 [main]
 interval_min=5      ; 0 = «Вручную» (очистка приостановлена)

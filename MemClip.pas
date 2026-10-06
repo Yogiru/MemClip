@@ -22,6 +22,8 @@ const
   WM_TRAYICON = WM_USER + 1;
   WM_CLEANUP_DONE = WM_USER + 2;
   WM_GRAB_CLICK = WM_USER + 3;
+  WM_OCRIDX_DONE = WM_APP + 6;
+  WM_UPDATE_DONE = WM_APP + 7;
 
   NIM_ADD = 0;
   NIM_MODIFY = 1;
@@ -58,6 +60,8 @@ const
   IDM_CTX_PLAIN = 119;
   IDM_CTX_PIN = 120;
   IDM_CTX_DEL = 121;
+  IDM_CTX_SAVE = 137;
+  IDM_UPDATE = 138;
   IDM_DNS = 122;
   IDM_BIN = 123;
   IDM_LANG_AUTO = 124;
@@ -67,6 +71,7 @@ const
   IDM_LANG_EN = 128;
   IDM_HK_SNIPWND = 129;
   IDM_HK_SNIPALL = 130;
+  IDM_HK_SNIPLAST = 136;
   IDM_CLIPBASE = 1000;
 
   IDC_GRAB_EDIT = 1;
@@ -89,6 +94,10 @@ const
   HOTKEY_SNIP = 5;
   HOTKEY_SNIPWND = 6;
   HOTKEY_SNIPALL = 7;
+  HOTKEY_SNIPLAST = 8;
+
+  APP_VERSION = '1.1.0';
+  UPD_API_URL = 'https://api.github.com/repos/Yogiru/MemClip/releases/latest';
 
   TIMER_EXIT = 2;
   TIMER_CLIPCAPTURE = 3;
@@ -228,7 +237,15 @@ type
     txtToolRect,
     txtToolText,
     txtToolBlur,
-    txtBtnUndo
+    txtBtnUndo,
+    txtSnipHint2,
+    txtSnipLast,
+    txtSaveAs,
+    txtSaveTitle,
+    txtUpdate,
+    txtUpdateNew,
+    txtUpdateLatest,
+    txtUpdateErr
   );
 
   TClipKind = (ckText, ckImage, ckFiles);
@@ -242,12 +259,28 @@ type
   TClipEntry = record
     Kind: TClipKind;
     Text: WideString;
+    OcrText: WideString;
     ImgW, ImgH: Integer;
     Pinned: Boolean;
     Time: QWord;
     StampUtc: TFileTime;
     Owner: WideString;
     Fmts: array of TClipFmt;
+  end;
+
+  POcrIdxJob = ^TOcrIdxJob;
+  TOcrIdxJob = record
+    Key: QWord;
+    StampLo, StampHi: DWORD;
+    Png: TBytes;
+    Text: WideString;
+  end;
+
+  PUpdJob = ^TUpdJob;
+  TUpdJob = record
+    Ok: Boolean;
+    Ver: string;
+    Url: WideString;
   end;
 
   TMSLLHookStruct = record
@@ -556,7 +589,15 @@ const
      'Рамка',
      'Текст',
      'Размытие',
-     'Назад'),
+     'Назад',
+     'Enter — редактор · Alt — в буфер · Ctrl — OCR · Shift — PNG · стрелки — подгонка · Esc — отмена',
+     'Повтор последней области',
+     'Сохранить как…',
+     'Сохранить запись',
+     'Проверить обновления',
+     'Доступна версия %s — открыть страницу загрузки?',
+     'У вас последняя версия',
+     'Не удалось проверить обновления'),
 
     // Ukrainian
     ('MemClip',
@@ -650,7 +691,15 @@ const
      'Рамка',
      'Текст',
      'Розмиття',
-     'Назад'),
+     'Назад',
+     'Enter — редактор · Alt — у буфер · Ctrl — OCR · Shift — PNG · стрілки — підгонка · Esc — скасувати',
+     'Повтор останньої області',
+     'Зберегти як…',
+     'Зберегти запис',
+     'Перевірити оновлення',
+     'Доступна версія %s — відкрити сторінку завантаження?',
+     'У вас остання версія',
+     'Не вдалося перевірити оновлення'),
 
     // Belarusian
     ('MemClip',
@@ -744,7 +793,15 @@ const
      'Рамка',
      'Тэкст',
      'Размыццё',
-     'Назад'),
+     'Назад',
+     'Enter — рэдактар · Alt — у буфер · Ctrl — OCR · Shift — PNG · стрэлкі — падгонка · Esc — адмена',
+     'Паўтор апошняй вобласці',
+     'Захаваць як…',
+     'Захаваць запіс',
+     'Праверыць абнаўленні',
+     'Даступная версія %s — адкрыць старонку спампоўкі?',
+     'У вас апошняя версія',
+     'Не ўдалося праверыць абнаўленні'),
 
     // English
     ('MemClip',
@@ -838,7 +895,15 @@ const
      'Rect',
      'Text',
      'Blur',
-     'Undo')
+     'Undo',
+     'Enter — editor · Alt — to clipboard · Ctrl — OCR · Shift — PNG · arrows — nudge · Esc — cancel',
+     'Repeat last region',
+     'Save as…',
+     'Save entry',
+     'Check for updates',
+     'Version %s is available — open the download page?',
+     'You have the latest version',
+     'Could not check for updates')
   );
 
 const
@@ -851,6 +916,40 @@ function EnumProcesses(lpidProcess: PLongWord; cb: LongWord; out cbNeeded: DWORD
 function GlobalMemoryStatusEx(var lpBuffer: TMemoryStatusEx): BOOL; stdcall; external 'kernel32' name 'GlobalMemoryStatusEx';
 function DnsFlushResolverCache: BOOL; stdcall; external 'dnsapi.dll' name 'DnsFlushResolverCache';
 function TrackPopupMenuCmd(hMenu: HMENU; uFlags: UINT; x, y, nReserved: Integer; hWnd: HWND; prcRect: Pointer): UINT; stdcall; external 'user32.dll' name 'TrackPopupMenu';
+
+type
+  TMcOpenFileNameW = record
+    lStructSize: DWORD;
+    hwndOwner: HWND;
+    hInstance: HINST;
+    lpstrFilter: PWideChar;
+    lpstrCustomFilter: PWideChar;
+    nMaxCustFilter: DWORD;
+    nFilterIndex: DWORD;
+    lpstrFile: PWideChar;
+    nMaxFile: DWORD;
+    lpstrFileTitle: PWideChar;
+    nMaxFileTitle: DWORD;
+    lpstrInitialDir: PWideChar;
+    lpstrTitle: PWideChar;
+    Flags: DWORD;
+    nFileOffset: Word;
+    nFileExtension: Word;
+    lpstrDefExt: PWideChar;
+    lCustData: LPARAM;
+    lpfnHook: Pointer;
+    lpTemplateName: PWideChar;
+  end;
+
+function GetSaveFileNameMcW(var ofn: TMcOpenFileNameW): BOOL; stdcall; external 'comdlg32.dll' name 'GetSaveFileNameW';
+
+function InternetOpenMcW(agent: PWideChar; accessType: DWORD; proxy, bypass: PWideChar;
+  flags: DWORD): Pointer; stdcall; external 'wininet.dll' name 'InternetOpenW';
+function InternetOpenUrlMcW(h: Pointer; url, headers: PWideChar; headersLen: DWORD;
+  flags, ctx: DWORD_PTR): Pointer; stdcall; external 'wininet.dll' name 'InternetOpenUrlW';
+function InternetReadFileMc(h: Pointer; buf: Pointer; num: DWORD;
+  out read: DWORD): BOOL; stdcall; external 'wininet.dll' name 'InternetReadFile';
+function InternetCloseHandleMc(h: Pointer): BOOL; stdcall; external 'wininet.dll' name 'InternetCloseHandle';
 function SHEmptyRecycleBinW(hWnd: HWND; pszRootPath: PWideChar; dwFlags: DWORD): HRESULT; stdcall; external 'shell32.dll' name 'SHEmptyRecycleBinW';
 function AddClipboardFormatListener(hwnd: HWND): BOOL; stdcall; external 'user32.dll' name 'AddClipboardFormatListener';
 function RoInitialize(initType: Longint): HRESULT; stdcall; external 'combase.dll';
@@ -903,6 +1002,7 @@ var
   ClipHistory: array of TClipEntry;
   ClipWatchEnabled, AutoPaste, GrabEnabled: Boolean;
   ClipHistoryMax: Integer;
+  ClipKeepDays: Integer;
   ClipMergeEnabled: Boolean;
   ClipExcludeProcs: WideString;
   LastForeWnd: HWND;
@@ -922,6 +1022,7 @@ var
   HotkeySnipMods, HotkeySnipVk: UINT;
   HotkeySnipWndMods, HotkeySnipWndVk: UINT;
   HotkeySnipAllMods, HotkeySnipAllVk: UINT;
+  HotkeySnipLastMods, HotkeySnipLastVk: UINT;
   MemFreeMinMb: DWORD;
   LangSetting: string;
   // Grab window (text selection)
@@ -946,6 +1047,9 @@ var
   // OCR (WinRT)
   OcrChecked: Boolean;
   gOcrEngine: IOcrEngine;
+  OcrCs: TRTLCriticalSection;
+  OcrIdxPending: Longint;
+  UpdateChecking: Boolean;
   // Snip overlay (screenshot region)
   hSnipWnd: HWND;
   SnipClsReg: Boolean;
@@ -953,6 +1057,13 @@ var
   SnipOrgX, SnipOrgY: Integer;
   SnipStart, SnipCur: TPoint;
   SnipDragging: Boolean;
+  SnipAdjusting: Boolean;   // выделение готово — можно двигать/подгонять
+  SnipMoving: Boolean;      // drag внутри выделения
+  SnipEdge: Integer;        // маска захваченных краёв: 1=L,2=T,4=R,8=B
+  SnipAnchor: TPoint;
+  SnipSel: TRect;           // выделение в режиме подгонки
+  SnipLastScr: TRect;       // последняя снятая область (экранные коорд.)
+  SnipLastOk: Boolean;
   // Screenshot annotation editor
   hEditWnd: HWND;
   EditClsReg: Boolean;
@@ -1560,6 +1671,8 @@ begin
     Inc(Result);
 end;
 
+procedure QueueOcrIndex(idx: Integer); forward;
+
 procedure EntrySetTextFmt(var e: TClipEntry);
 var
   j: Integer;
@@ -1613,6 +1726,8 @@ begin
     ClipHistory[p] := e;
     while Length(ClipHistory) - CountPinned > ClipHistoryMax do
       SetLength(ClipHistory, Length(ClipHistory) - 1);
+    if ClipHistory[p].Kind = ckImage then
+      QueueOcrIndex(p);
   end;
   if hMainWnd <> 0 then
     SetTimer(hMainWnd, TIMER_HISTSAVE, 5000, nil);
@@ -2560,6 +2675,7 @@ begin
   for i := 0 to High(ClipHistory) do
     if (flt = '') or
        (Pos(flt, WideLowerCase(ClipHistory[i].Text)) > 0) or
+       (Pos(flt, WideLowerCase(ClipHistory[i].OcrText)) > 0) or
        (Pos(flt, WideLowerCase(ClipMenuLabel(ClipHistory[i]))) > 0) then
     begin
       SetLength(ViewIdx, Length(ViewIdx) + 1);
@@ -2583,6 +2699,98 @@ begin
   lbIdx := SendMessageW(hViewList, LB_GETCURSEL, 0, 0);
   if (lbIdx >= 0) and (lbIdx < Length(ViewIdx)) then
     Result := ViewIdx[lbIdx];
+end;
+
+function EntryPngBytes(const e: TClipEntry): TBytes;
+var
+  i: Integer;
+begin
+  Result := nil;
+  for i := 0 to High(e.Fmts) do
+    if ((CompareText(e.Fmts[i].FmtName, 'PNG') = 0) or
+        (CompareText(e.Fmts[i].FmtName, 'image/png') = 0)) and
+       (Length(e.Fmts[i].Data) > 0) then
+    begin
+      Result := e.Fmts[i].Data;
+      Exit;
+    end;
+  for i := 0 to High(e.Fmts) do
+    if ((e.Fmts[i].Fmt = CF_DIB) or (e.Fmts[i].Fmt = CF_DIBV5)) and
+       (Length(e.Fmts[i].Data) > 0) then
+    begin
+      Result := PngFromDib(e.Fmts[i].Data);
+      Exit;
+    end;
+end;
+
+procedure EntrySaveAs(idx: Integer; owner: HWND);
+const
+  OFN_OVERWRITEPROMPT_MC = $00000002;
+  OFN_PATHMUSTEXIST_MC = $00000800;
+var
+  data: TBytes;
+  s, filter, ext: WideString;
+  n, k: Integer;
+  fn: array[0..MAX_PATH] of WideChar;
+  ofn: TMcOpenFileNameW;
+  hf: THandle;
+  fs: THandleStream;
+begin
+  if (idx < 0) or (idx >= Length(ClipHistory)) then
+    Exit;
+  if ClipHistory[idx].Kind = ckImage then
+  begin
+    data := EntryPngBytes(ClipHistory[idx]);
+    if Length(data) = 0 then
+      Exit;
+    ext := 'png';
+    filter := WideString('PNG files (*.png)'#0'*.png'#0);
+  end
+  else
+  begin
+    s := ClipHistory[idx].Text;
+    if s = '' then
+      Exit;
+    SetLength(data, 3 + Length(s) * 3);
+    data[0] := $EF;
+    data[1] := $BB;
+    data[2] := $BF;
+    n := WideCharToMultiByte(65001, 0, PWideChar(s), Length(s),
+      PAnsiChar(@data[3]), Length(data) - 3, nil, nil);
+    if n <= 0 then
+      Exit;
+    SetLength(data, 3 + n);
+    ext := 'txt';
+    filter := WideString('Text files (*.txt)'#0'*.txt'#0);
+  end;
+  s := AsWide('clip_' + FormatDateTime('yyyymmdd_hhnnss', Now) + '.') + ext;
+  FillChar(fn, SizeOf(fn), 0);
+  k := Length(s);
+  if k > MAX_PATH - 1 then
+    k := MAX_PATH - 1;
+  Move(PWideChar(s)^, fn[0], k * SizeOf(WideChar));
+  FillChar(ofn, SizeOf(ofn), 0);
+  ofn.lStructSize := SizeOf(ofn);
+  ofn.hwndOwner := owner;
+  ofn.lpstrFile := @fn[0];
+  ofn.nMaxFile := MAX_PATH;
+  ofn.lpstrFilter := PWideChar(filter);
+  ofn.lpstrTitle := PWideChar(AsWide(GetText(txtSaveTitle)));
+  ofn.lpstrDefExt := PWideChar(ext);
+  ofn.Flags := OFN_OVERWRITEPROMPT_MC or OFN_PATHMUSTEXIST_MC;
+  if not GetSaveFileNameMcW(ofn) then
+    Exit;
+  hf := CreateFileW(@fn[0], GENERIC_WRITE, 0, nil, CREATE_ALWAYS,
+    FILE_ATTRIBUTE_NORMAL, 0);
+  if hf = INVALID_HANDLE_VALUE then
+    Exit;
+  fs := THandleStream.Create(hf);
+  try
+    fs.WriteBuffer(data[0], Length(data));
+  finally
+    fs.Free;
+  end;
+  CloseHandle(hf);
 end;
 
 procedure ViewUpdatePinBtn;
@@ -2777,6 +2985,8 @@ begin
           else
             AppendMenuW(ctxMenu, MF_STRING, IDM_CTX_PIN,
               PWideChar(AsWide(GetText(txtBtnPin))));
+          AppendMenuW(ctxMenu, MF_STRING, IDM_CTX_SAVE,
+            PWideChar(AsWide(GetText(txtSaveAs))));
           AppendMenuW(ctxMenu, MF_SEPARATOR, 0, nil);
           AppendMenuW(ctxMenu, MF_STRING, IDM_CTX_DEL,
             PWideChar(AsWide(GetText(txtBtnDelete))));
@@ -2800,6 +3010,8 @@ begin
                 ViewRebuildFilter;
                 ViewUpdatePinBtn;
               end;
+            IDM_CTX_SAVE:
+              EntrySaveAs(sel, hWnd);
             IDM_CTX_DEL:
               RemoveClipEntry(sel);
           end;
@@ -2974,6 +3186,38 @@ begin
   end;
 end;
 
+procedure PurgeOldHistory;
+var
+  i, j: Integer;
+  nowFt: TFileTime;
+  cut64, ft64: Int64;
+  pruned: Boolean;
+begin
+  if ClipKeepDays <= 0 then
+    Exit;
+  GetSystemTimeAsFileTime(nowFt);
+  cut64 := (Int64(nowFt.dwHighDateTime) shl 32) or nowFt.dwLowDateTime;
+  cut64 := cut64 - Int64(ClipKeepDays) * 864000000000;
+  pruned := False;
+  i := 0;
+  while i <= High(ClipHistory) do
+  begin
+    ft64 := (Int64(ClipHistory[i].StampUtc.dwHighDateTime) shl 32) or
+      ClipHistory[i].StampUtc.dwLowDateTime;
+    if (not ClipHistory[i].Pinned) and (ft64 <> 0) and (ft64 < cut64) then
+    begin
+      for j := i to High(ClipHistory) - 1 do
+        ClipHistory[j] := ClipHistory[j + 1];
+      SetLength(ClipHistory, Length(ClipHistory) - 1);
+      pruned := True;
+    end
+    else
+      Inc(i);
+  end;
+  if pruned and (hMainWnd <> 0) then
+    SetTimer(hMainWnd, TIMER_HISTSAVE, 2000, nil);
+end;
+
 procedure LoadHistory;
 var
   fs: TFileStream;
@@ -3075,6 +3319,7 @@ begin
     finally
       fs.Free;
     end;
+    PurgeOldHistory;
   except
   end;
 end;
@@ -3359,37 +3604,263 @@ var
   slen: UINT32;
 begin
   Result := '';
-  if WinRtFactory('Windows.Graphics.Imaging.SoftwareBitmap', IID_ISB_STATICS, sbFac) <> S_OK then
+  EnterCriticalSection(OcrCs);
+  try
+    if WinRtFactory('Windows.Graphics.Imaging.SoftwareBitmap', IID_ISB_STATICS, sbFac) <> S_OK then
+      Exit;
+    nbuf := TNativeBuffer.Create(w * h * 4);
+    Move(bits^, nbuf.DataPtr^, w * h * 4);
+    bufIf := nbuf as IBuffer;
+    bufIf.put_Length(w * h * 4);
+    if sbFac.CreateCopyFromBuffer(bufIf, BITMAP_PF_BGRA8, w, h, sb) <> S_OK then
+      Exit;
+    if gOcrEngine.RecognizeAsync(sb, op) <> S_OK then
+      Exit;
+    ainfo := nil;
+    op.QueryInterface(IID_ASYNC_INFO, ainfo);
+    if ainfo = nil then
+      Exit;
+    tries := 0;
+    status := 0;
+    repeat
+      ainfo.get_Status(status);
+      if status <> 0 then
+        Break;
+      Sleep(50);
+      Inc(tries);
+    until tries > 200;
+    if status <> 1 then
+      Exit;
+    if op.GetResults(res) <> S_OK then
+      Exit;
+    ores := IOcrResult(res);
+    hs := nil;
+    if ores.get_Text(hs) = S_OK then
+      Result := WindowsGetStringRawBuffer(hs, slen);
+  finally
+    LeaveCriticalSection(OcrCs);
+  end;
+end;
+
+function PngToBgra(const png: TBytes; out w, h: Integer): TBytes;
+var
+  stmIn: IStream;
+  img: Pointer;
+  hbm: HBITMAP;
+  bm: BITMAP;
+  bi: BITMAPINFO;
+  sdc: HDC;
+begin
+  Result := nil;
+  w := 0;
+  h := 0;
+  if (Length(png) = 0) or not EnsureGdiPlus then
     Exit;
-  nbuf := TNativeBuffer.Create(w * h * 4);
-  Move(bits^, nbuf.DataPtr^, w * h * 4);
-  bufIf := nbuf as IBuffer;
-  bufIf.put_Length(w * h * 4);
-  if sbFac.CreateCopyFromBuffer(bufIf, BITMAP_PF_BGRA8, w, h, sb) <> S_OK then
+  stmIn := StreamFromBytes(png);
+  if stmIn = nil then
     Exit;
-  if gOcrEngine.RecognizeAsync(sb, op) <> S_OK then
+  img := nil;
+  if GdipCreateBitmapFromStream(stmIn, img) <> 0 then
     Exit;
-  ainfo := nil;
-  op.QueryInterface(IID_ASYNC_INFO, ainfo);
-  if ainfo = nil then
+  hbm := 0;
+  if GdipCreateHBITMAPFromBitmap(img, hbm, 0) = 0 then
+  begin
+    FillChar(bm, SizeOf(bm), 0);
+    if (hbm <> 0) and (GetObjectW(hbm, SizeOf(bm), @bm) <> 0) then
+    begin
+      w := bm.bmWidth;
+      h := bm.bmHeight;
+      if (w > 0) and (h > 0) and (Int64(w) * h < 40000000) then
+      begin
+        SetLength(Result, w * h * 4);
+        FillChar(bi.bmiHeader, SizeOf(bi.bmiHeader), 0);
+        bi.bmiHeader.biSize := SizeOf(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth := w;
+        bi.bmiHeader.biHeight := -h;
+        bi.bmiHeader.biPlanes := 1;
+        bi.bmiHeader.biBitCount := 32;
+        bi.bmiHeader.biCompression := BI_RGB;
+        sdc := GetDC(0);
+        if GetDIBits(sdc, hbm, 0, h, @Result[0], bi, DIB_RGB_COLORS) <> h then
+          Result := nil;
+        ReleaseDC(0, sdc);
+      end;
+    end;
+    if hbm <> 0 then
+      DeleteObject(hbm);
+  end;
+  GdipDisposeImage(img);
+end;
+
+function OcrIdxThread(param: Pointer): Longint;
+var
+  job: POcrIdxJob;
+  w, h: Integer;
+  px: TBytes;
+begin
+  Result := 0;
+  job := POcrIdxJob(param);
+  try
+    RoInitialize(1);
+    px := PngToBgra(job^.Png, w, h);
+    if (Length(px) > 0) and OcrEnsureEngine then
+      job^.Text := OcrPixelsToText(@px[0], w, h);
+  except
+  end;
+  if not ((hMainWnd <> 0) and PostMessage(hMainWnd, WM_OCRIDX_DONE, 0, LPARAM(job))) then
+    Dispose(job);
+end;
+
+procedure QueueOcrIndex(idx: Integer);
+var
+  job: POcrIdxJob;
+  tid: DWORD;
+begin
+  if (idx < 0) or (idx > High(ClipHistory)) then
     Exit;
-  tries := 0;
-  status := 0;
-  repeat
-    ainfo.get_Status(status);
-    if status <> 0 then
-      Break;
-    Sleep(50);
-    Inc(tries);
-  until tries > 200;
-  if status <> 1 then
+  if ClipHistory[idx].Kind <> ckImage then
     Exit;
-  if op.GetResults(res) <> S_OK then
+  if InterlockedIncrement(OcrIdxPending) > 3 then
+  begin
+    InterlockedDecrement(OcrIdxPending);
     Exit;
-  ores := IOcrResult(res);
-  hs := nil;
-  if ores.get_Text(hs) = S_OK then
-    Result := WindowsGetStringRawBuffer(hs, slen);
+  end;
+  New(job);
+  job^.Key := ClipHistory[idx].Time;
+  job^.StampLo := ClipHistory[idx].StampUtc.dwLowDateTime;
+  job^.StampHi := ClipHistory[idx].StampUtc.dwHighDateTime;
+  job^.Png := EntryPngBytes(ClipHistory[idx]);
+  job^.Text := '';
+  if (Length(job^.Png) = 0) or
+     (THandle(BeginThread(nil, 0, @OcrIdxThread, job, 0, tid)) = 0) then
+  begin
+    Dispose(job);
+    InterlockedDecrement(OcrIdxPending);
+  end;
+end;
+
+function JsonStrValue(const js, key: string): string;
+var
+  p, e: Integer;
+begin
+  Result := '';
+  p := Pos('"' + key + '"', js);
+  if p = 0 then
+    Exit;
+  p := Pos(':', js, p);
+  if p = 0 then
+    Exit;
+  p := Pos('"', js, p);
+  if p = 0 then
+    Exit;
+  e := Pos('"', js, p + 1);
+  if e = 0 then
+    Exit;
+  Result := Copy(js, p + 1, e - p - 1);
+end;
+
+function VersionNewer(const tag, cur: string): Boolean;
+var
+  a, b: string;
+  pa, pb, na, nb: Integer;
+begin
+  a := tag;
+  b := cur;
+  if (Length(a) > 0) and ((a[1] = 'v') or (a[1] = 'V')) then
+    Delete(a, 1, 1);
+  Result := False;
+  while (a <> '') or (b <> '') do
+  begin
+    pa := Pos('.', a);
+    pb := Pos('.', b);
+    if pa = 0 then
+      na := StrToIntDef(a, 0)
+    else
+      na := StrToIntDef(Copy(a, 1, pa - 1), 0);
+    if pb = 0 then
+      nb := StrToIntDef(b, 0)
+    else
+      nb := StrToIntDef(Copy(b, 1, pb - 1), 0);
+    if na > nb then
+      Exit(True)
+    else if na < nb then
+      Exit;
+    if pa = 0 then
+      a := ''
+    else
+      a := Copy(a, pa + 1, MaxInt);
+    if pb = 0 then
+      b := ''
+    else
+      b := Copy(b, pb + 1, MaxInt);
+  end;
+end;
+
+function UpdThread(param: Pointer): Longint;
+const
+  IF_SECURE = $00800000;
+  IF_RELOAD = $80000000;
+  IF_NO_CACHE = $04000000;
+var
+  job: PUpdJob;
+  hi, hu: Pointer;
+  buf: array[0..8191] of AnsiChar;
+  rd: DWORD;
+  js: AnsiString;
+  u: string;
+begin
+  Result := 0;
+  job := PUpdJob(param);
+  hi := nil;
+  hu := nil;
+  js := '';
+  try
+    hi := InternetOpenMcW(PWideChar(WideString('MemClip/' + APP_VERSION)),
+      0, nil, nil, 0);
+    if hi <> nil then
+      hu := InternetOpenUrlMcW(hi, PWideChar(WideString(UPD_API_URL)), nil, 0,
+        IF_SECURE or IF_RELOAD or IF_NO_CACHE, 0);
+    if hu <> nil then
+      repeat
+        rd := 0;
+        if not InternetReadFileMc(hu, @buf[0], SizeOf(buf), rd) then
+          Break;
+        if rd > 0 then
+          js := js + Copy(PAnsiChar(@buf[0]), 1, rd);
+      until (rd = 0) or (Length(js) > 1048576);
+    job^.Ver := JsonStrValue(string(js), 'tag_name');
+    u := JsonStrValue(string(js), 'html_url');
+    job^.Url := WideString(u);
+    job^.Ok := (job^.Ver <> '') and (u <> '');
+  except
+    job^.Ok := False;
+  end;
+  if hu <> nil then
+    InternetCloseHandleMc(hu);
+  if hi <> nil then
+    InternetCloseHandleMc(hi);
+  if (hMainWnd = 0) or not PostMessage(hMainWnd, WM_UPDATE_DONE, 0, LPARAM(job)) then
+    Dispose(job);
+end;
+
+procedure CheckUpdates;
+var
+  job: PUpdJob;
+  tid: DWORD;
+begin
+  if UpdateChecking then
+    Exit;
+  UpdateChecking := True;
+  New(job);
+  job^.Ok := False;
+  job^.Ver := '';
+  job^.Url := '';
+  if THandle(BeginThread(nil, 0, @UpdThread, job, 0, tid)) = 0 then
+  begin
+    Dispose(job);
+    UpdateChecking := False;
+    QueueInfo(GetText(txtUpdateErr));
+  end;
 end;
 
 function UiaElementRect(pt: TPoint; out rc: TRect): Boolean;
@@ -3727,10 +4198,45 @@ end;
 
 function SnipSelRect: TRect;
 begin
-  Result.Left := Min(SnipStart.X, SnipCur.X);
-  Result.Top := Min(SnipStart.Y, SnipCur.Y);
-  Result.Right := Max(SnipStart.X, SnipCur.X);
-  Result.Bottom := Max(SnipStart.Y, SnipCur.Y);
+  if SnipAdjusting then
+    Result := SnipSel
+  else
+  begin
+    Result.Left := Min(SnipStart.X, SnipCur.X);
+    Result.Top := Min(SnipStart.Y, SnipCur.Y);
+    Result.Right := Max(SnipStart.X, SnipCur.X);
+    Result.Bottom := Max(SnipStart.Y, SnipCur.Y);
+  end;
+end;
+
+const
+  SNIP_EDGE_M = 6;
+
+function SnipHitEdge(const rc: TRect; x, y: Integer): Integer;
+begin
+  Result := 0;
+  if (y >= rc.Top - SNIP_EDGE_M) and (y <= rc.Bottom + SNIP_EDGE_M) then
+  begin
+    if Abs(x - rc.Left) <= SNIP_EDGE_M then Result := Result or 1;
+    if Abs(x - rc.Right) <= SNIP_EDGE_M then Result := Result or 4;
+  end;
+  if (x >= rc.Left - SNIP_EDGE_M) and (x <= rc.Right + SNIP_EDGE_M) then
+  begin
+    if Abs(y - rc.Top) <= SNIP_EDGE_M then Result := Result or 2;
+    if Abs(y - rc.Bottom) <= SNIP_EDGE_M then Result := Result or 8;
+  end;
+end;
+
+function SnipModeFromKeys: Integer;
+begin
+  if GetKeyState(VK_CONTROL) < 0 then
+    Result := 1
+  else if GetKeyState(VK_SHIFT) < 0 then
+    Result := 2
+  else if GetKeyState(VK_MENU) < 0 then
+    Result := 0
+  else
+    Result := 3;
 end;
 
 procedure SnipApplyRgn(hWnd: HWND);
@@ -3815,6 +4321,8 @@ begin
   h := rScr.Bottom - rScr.Top;
   if (w < 4) or (h < 4) then
     Exit;
+  SnipLastScr := rScr;
+  SnipLastOk := True;
   Sleep(120);
   sdc := GetDC(0);
   mdc := CreateCompatibleDC(sdc);
@@ -3862,7 +4370,7 @@ var
   ps: TPaintStruct;
   dc: HDC;
   sz: WideString;
-  mode: Integer;
+  mode, i, dx, dy: Integer;
 begin
   Result := 0;
   case uMsg of
@@ -3875,47 +4383,131 @@ begin
       end;
     WM_LBUTTONDOWN:
       begin
-        SetCapture(hWnd);
-        SnipDragging := True;
-        SnipStart.X := SmallInt(Word(lParam));
-        SnipStart.Y := SmallInt(Word(lParam shr 16));
-        SnipCur := SnipStart;
+        rc.TopLeft.X := SmallInt(Word(lParam));
+        rc.TopLeft.Y := SmallInt(Word(lParam shr 16));
+        if SnipAdjusting then
+        begin
+          SnipEdge := SnipHitEdge(SnipSel, rc.Left, rc.Top);
+          if SnipEdge <> 0 then
+            SetCapture(hWnd)
+          else if PtInRect(SnipSel, rc.TopLeft) then
+          begin
+            SnipMoving := True;
+            SnipAnchor := rc.TopLeft;
+            SetCapture(hWnd);
+          end
+          else
+          begin
+            SnipAdjusting := False;
+            SnipDragging := True;
+            SnipStart := rc.TopLeft;
+            SnipCur := SnipStart;
+            SetCapture(hWnd);
+          end;
+        end
+        else
+        begin
+          SetCapture(hWnd);
+          SnipDragging := True;
+          SnipStart := rc.TopLeft;
+          SnipCur := SnipStart;
+        end;
         InvalidateRect(hWnd, nil, True);
       end;
     WM_MOUSEMOVE:
-      if SnipDragging then
       begin
-        SnipCur.X := SmallInt(Word(lParam));
-        SnipCur.Y := SmallInt(Word(lParam shr 16));
-        SnipApplyRgn(hWnd);
+        rc.TopLeft.X := SmallInt(Word(lParam));
+        rc.TopLeft.Y := SmallInt(Word(lParam shr 16));
+        if SnipDragging then
+        begin
+          SnipCur := rc.TopLeft;
+          SnipApplyRgn(hWnd);
+        end
+        else if SnipMoving then
+        begin
+          OffsetRect(SnipSel, rc.Left - SnipAnchor.X, rc.Top - SnipAnchor.Y);
+          SnipAnchor := rc.TopLeft;
+          SnipApplyRgn(hWnd);
+        end
+        else if SnipEdge <> 0 then
+        begin
+          if (SnipEdge and 1) <> 0 then
+            SnipSel.Left := Min(rc.Left, SnipSel.Right - 4);
+          if (SnipEdge and 4) <> 0 then
+            SnipSel.Right := Max(rc.Left, SnipSel.Left + 4);
+          if (SnipEdge and 2) <> 0 then
+            SnipSel.Top := Min(rc.Top, SnipSel.Bottom - 4);
+          if (SnipEdge and 8) <> 0 then
+            SnipSel.Bottom := Max(rc.Top, SnipSel.Top + 4);
+          SnipApplyRgn(hWnd);
+        end;
       end;
     WM_LBUTTONUP:
-      if SnipDragging then
       begin
-        ReleaseCapture;
-        SnipDragging := False;
-        rc := SnipSelRect;
+        if SnipMoving or (SnipEdge <> 0) then
+        begin
+          SnipMoving := False;
+          SnipEdge := 0;
+          ReleaseCapture;
+          InvalidateRect(hWnd, nil, True);
+        end
+        else if SnipDragging then
+        begin
+          ReleaseCapture;
+          SnipDragging := False;
+          SnipSel := SnipSelRect;
+          if (SnipSel.Right - SnipSel.Left > 4) and
+             (SnipSel.Bottom - SnipSel.Top > 4) then
+          begin
+            SnipAdjusting := True;
+            SnipApplyRgn(hWnd);
+          end
+          else
+            DestroyWindow(hWnd);
+        end;
+      end;
+    WM_RBUTTONDOWN:
+      DestroyWindow(hWnd);
+    WM_KEYDOWN:
+      if wParam = VK_ESCAPE then
+        DestroyWindow(hWnd)
+      else if (wParam = VK_RETURN) and SnipAdjusting then
+      begin
+        mode := SnipModeFromKeys;
+        rc := SnipSel;
         OffsetRect(rc, SnipOrgX, SnipOrgY);
-        if GetKeyState(VK_CONTROL) < 0 then
-          mode := 1
-        else if GetKeyState(VK_SHIFT) < 0 then
-          mode := 2
-        else if GetKeyState(VK_MENU) < 0 then
-          mode := 0
-        else
-          mode := 3;
         DestroyWindow(hWnd);
         SnipFinish(rc, mode);
+      end
+      else if (wParam >= VK_LEFT) and (wParam <= VK_DOWN) then
+      begin
+        i := 1;
+        if GetKeyState(VK_SHIFT) < 0 then
+          i := 10;
+        case wParam of
+          VK_LEFT:  begin dx := -i; dy := 0; end;
+          VK_RIGHT: begin dx := i;  dy := 0; end;
+          VK_UP:    begin dx := 0;  dy := -i; end;
+        else        begin dx := 0;  dy := i;  end;
+        end;
+        if SnipAdjusting then
+        begin
+          OffsetRect(SnipSel, dx, dy);
+          SnipApplyRgn(hWnd);
+        end
+        else if SnipDragging then
+        begin
+          Inc(SnipCur.X, dx);
+          Inc(SnipCur.Y, dy);
+          SnipApplyRgn(hWnd);
+        end;
       end;
-    WM_RBUTTONDOWN, WM_KEYDOWN:
-      if (uMsg = WM_RBUTTONDOWN) or (wParam = VK_ESCAPE) then
-        DestroyWindow(hWnd);
     WM_PAINT:
       begin
         dc := BeginPaint(hWnd, ps);
         GetClientRect(hWnd, rc);
         FillRect(dc, rc, hSnipBrush);
-        if SnipDragging then
+        if SnipDragging or SnipAdjusting then
         begin
           rc := SnipSelRect;
           if (rc.Right - rc.Left > 4) and (rc.Bottom - rc.Top > 4) then
@@ -3938,6 +4530,17 @@ begin
             end;
             DrawTextW(dc, PWideChar(sz), -1, rcText,
               DT_LEFT or DT_SINGLELINE or DT_NOPREFIX);
+          end;
+          if SnipAdjusting then
+          begin
+            sz := AsWide(GetText(txtSnipHint2));
+            SetTextColor(dc, RGB(255, 255, 255));
+            SetBkMode(dc, TRANSPARENT);
+            SelectObject(dc, hPopupFont);
+            GetClientRect(hWnd, rcText);
+            rcText.Top := 24;
+            DrawTextW(dc, PWideChar(sz), -1, rcText,
+              DT_CENTER or DT_SINGLELINE or DT_NOPREFIX);
           end;
         end
         else
@@ -3968,6 +4571,7 @@ var
 begin
   if hSnipWnd <> 0 then
     Exit;
+  LastForeWnd := GetForegroundWindow;
   if not SnipClsReg then
   begin
     SnipClsReg := True;
@@ -3993,6 +4597,9 @@ begin
   SnipOrgX := vx;
   SnipOrgY := vy;
   SnipDragging := False;
+  SnipAdjusting := False;
+  SnipMoving := False;
+  SnipEdge := 0;
   hSnipWnd := CreateWindowExW(WS_EX_TOPMOST or WS_EX_TOOLWINDOW or WS_EX_LAYERED,
     PWideChar(SnipClassName), PWideChar(AsWide(GetText(txtSnipTitle))),
     WS_POPUP, vx, vy, vw, vh, 0, 0, HInstance, nil);
@@ -4642,6 +5249,12 @@ begin
                 EditCloseInput(True);
                 EditCommit(False);
                 DestroyWindow(hWnd);
+                if AutoPaste and (LastForeWnd <> 0) and IsWindow(LastForeWnd) then
+                begin
+                  SetForegroundWindow(LastForeWnd);
+                  Sleep(60);
+                  SendCtrlV;
+                end;
               end;
             IDC_ED_SAVE:
               begin
@@ -4773,20 +5386,32 @@ end;
 procedure SnipWindow;
 var
   r: TRect;
+  w: HWND;
 begin
-  if GetWindowRect(GetForegroundWindow, r) then
-    SnipFinish(r, 0);
+  w := GetForegroundWindow;
+  if GetWindowRect(w, r) then
+  begin
+    LastForeWnd := w;
+    if GetKeyState(VK_SHIFT) < 0 then
+      SnipFinish(r, 0)
+    else
+      SnipFinish(r, 3);
+  end;
 end;
 
 procedure SnipAll;
 var
   r: TRect;
 begin
+  LastForeWnd := GetForegroundWindow;
   r.Left := GetSystemMetrics(SM_XVIRTUALSCREEN);
   r.Top := GetSystemMetrics(SM_YVIRTUALSCREEN);
   r.Right := r.Left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
   r.Bottom := r.Top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-  SnipFinish(r, 0);
+  if GetKeyState(VK_SHIFT) < 0 then
+    SnipFinish(r, 0)
+  else
+    SnipFinish(r, 3);
 end;
 
 { ==================== Mouse hook ==================== }
@@ -4978,11 +5603,13 @@ begin
   UnregisterHotKey(hMainWnd, HOTKEY_SNIP);
   UnregisterHotKey(hMainWnd, HOTKEY_SNIPWND);
   UnregisterHotKey(hMainWnd, HOTKEY_SNIPALL);
+  UnregisterHotKey(hMainWnd, HOTKEY_SNIPLAST);
   RegisterHotKey(hMainWnd, HOTKEY_CLIPMENU, HotkeyClipMods or MOD_NOREPEAT, HotkeyClipVk);
   RegisterHotKey(hMainWnd, HOTKEY_PLAIN, HotkeyPlainMods or MOD_NOREPEAT, HotkeyPlainVk);
   RegisterHotKey(hMainWnd, HOTKEY_SNIP, HotkeySnipMods or MOD_NOREPEAT, HotkeySnipVk);
   RegisterHotKey(hMainWnd, HOTKEY_SNIPWND, HotkeySnipWndMods or MOD_NOREPEAT, HotkeySnipWndVk);
   RegisterHotKey(hMainWnd, HOTKEY_SNIPALL, HotkeySnipAllMods or MOD_NOREPEAT, HotkeySnipAllVk);
+  RegisterHotKey(hMainWnd, HOTKEY_SNIPLAST, HotkeySnipLastMods or MOD_NOREPEAT, HotkeySnipLastVk);
   if GrabEnabled then
   begin
     RegisterHotKey(hMainWnd, HOTKEY_GRAB, HotkeyGrabMods or MOD_NOREPEAT, HotkeyGrabVk);
@@ -5031,6 +5658,10 @@ begin
     PWideChar(WideString('snipall_mods')), MOD_CONTROL or MOD_ALT, p);
   HotkeySnipAllVk := GetPrivateProfileIntW(PWideChar(WideString('hotkeys')),
     PWideChar(WideString('snipall_vk')), Ord('F'), p);
+  HotkeySnipLastMods := GetPrivateProfileIntW(PWideChar(WideString('hotkeys')),
+    PWideChar(WideString('sniplast_mods')), MOD_CONTROL or MOD_ALT or MOD_SHIFT, p);
+  HotkeySnipLastVk := GetPrivateProfileIntW(PWideChar(WideString('hotkeys')),
+    PWideChar(WideString('sniplast_vk')), Ord('S'), p);
   n := DWORD(GetPrivateProfileIntW(PWideChar(WideString('main')),
     PWideChar(WideString('interval_min')), -1, p));
   if n <> DWORD(-1) then
@@ -5064,6 +5695,12 @@ begin
     ClipHistoryMax := 5;
   if ClipHistoryMax > CLIP_HISTORY_TOTAL_MAX then
     ClipHistoryMax := CLIP_HISTORY_TOTAL_MAX;
+  ClipKeepDays := GetPrivateProfileIntW(PWideChar(WideString('clipboard')),
+    PWideChar(WideString('keep_days')), 0, p);
+  if ClipKeepDays < 0 then
+    ClipKeepDays := 0;
+  if ClipKeepDays > 3650 then
+    ClipKeepDays := 3650;
   n := GetPrivateProfileStringW(PWideChar(WideString('clipboard')),
     PWideChar(WideString('exclude')), nil, buf, Length(buf), p);
   if n > 0 then
@@ -5104,6 +5741,10 @@ begin
     PWideChar(AsWide(IntToStr(HotkeySnipAllMods))), p);
   WritePrivateProfileStringW(PWideChar(WideString('hotkeys')), PWideChar(WideString('snipall_vk')),
     PWideChar(AsWide(IntToStr(HotkeySnipAllVk))), p);
+  WritePrivateProfileStringW(PWideChar(WideString('hotkeys')), PWideChar(WideString('sniplast_mods')),
+    PWideChar(AsWide(IntToStr(HotkeySnipLastMods))), p);
+  WritePrivateProfileStringW(PWideChar(WideString('hotkeys')), PWideChar(WideString('sniplast_vk')),
+    PWideChar(AsWide(IntToStr(HotkeySnipLastVk))), p);
   if Paused then
     WritePrivateProfileStringW(PWideChar(WideString('main')), PWideChar(WideString('interval_min')),
       '0', p)
@@ -5130,6 +5771,8 @@ begin
     PWideChar(ClipExcludeProcs), p);
   WritePrivateProfileStringW(PWideChar(WideString('clipboard')), PWideChar(WideString('max')),
     PWideChar(AsWide(IntToStr(ClipHistoryMax))), p);
+  WritePrivateProfileStringW(PWideChar(WideString('clipboard')), PWideChar(WideString('keep_days')),
+    PWideChar(AsWide(IntToStr(ClipKeepDays))), p);
 end;
 
 function HkWndProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall;
@@ -5287,6 +5930,8 @@ begin
     ForceRun := True;
     SetEvent(hEvent);
   end;
+  if ClipKeepDays > 0 then
+    PurgeOldHistory;
 end;
 
 procedure DoShowPopup(const ws: WideString);
@@ -5494,7 +6139,7 @@ var
   uFlags: UINT;
   sManual, sClean, sAutostart, sInterval, sExit: string;
   sClipWatch, sClipAutoPaste, sGrabToggle: string;
-  hk1, hk2, hk3, hk4, hk5, hk6, hk7: WideString;
+  hk1, hk2, hk3, hk4, hk5, hk6, hk7, hk8: WideString;
 
   procedure AddIntervalItem(id: UINT; const labelText: string; intervalMs: DWORD);
   begin
@@ -5586,6 +6231,7 @@ begin
   AppendMenuW(TrayMenu, MF_STRING, IDM_THUMBCACHE, PWideChar(AsWide(GetText(txtThumbCache))));
   AppendMenuW(TrayMenu, MF_STRING, IDM_DNS, PWideChar(AsWide(GetText(txtDns))));
   AppendMenuW(TrayMenu, MF_STRING, IDM_BIN, PWideChar(AsWide(GetText(txtBin))));
+  AppendMenuW(TrayMenu, MF_STRING, IDM_UPDATE, PWideChar(AsWide(GetText(txtUpdate))));
 
   hk1 := AsWide(GetText(txtHkClip)) + '   ' + HotkeyText(HotkeyClipMods, HotkeyClipVk);
   hk2 := AsWide(GetText(txtGrabTitle)) + '   ' + HotkeyText(HotkeyGrabMods, HotkeyGrabVk);
@@ -5594,6 +6240,7 @@ begin
   hk5 := AsWide(GetText(txtSnipTitle)) + '   ' + HotkeyText(HotkeySnipMods, HotkeySnipVk);
   hk6 := AsWide(GetText(txtSnipWnd)) + '   ' + HotkeyText(HotkeySnipWndMods, HotkeySnipWndVk);
   hk7 := AsWide(GetText(txtSnipAll)) + '   ' + HotkeyText(HotkeySnipAllMods, HotkeySnipAllVk);
+  hk8 := AsWide(GetText(txtSnipLast)) + '   ' + HotkeyText(HotkeySnipLastMods, HotkeySnipLastVk);
   AppendMenuW(HkMenu, MF_STRING, IDM_HK_CLIP, PWideChar(hk1));
   AppendMenuW(HkMenu, MF_STRING, IDM_HK_GRAB, PWideChar(hk2));
   AppendMenuW(HkMenu, MF_STRING, IDM_HK_PLAIN, PWideChar(hk3));
@@ -5601,6 +6248,7 @@ begin
   AppendMenuW(HkMenu, MF_STRING, IDM_HK_SNIP, PWideChar(hk5));
   AppendMenuW(HkMenu, MF_STRING, IDM_HK_SNIPWND, PWideChar(hk6));
   AppendMenuW(HkMenu, MF_STRING, IDM_HK_SNIPALL, PWideChar(hk7));
+  AppendMenuW(HkMenu, MF_STRING, IDM_HK_SNIPLAST, PWideChar(hk8));
   AppendMenuW(HkMenu, MF_SEPARATOR, 0, nil);
   AppendMenuW(HkMenu, MF_STRING or MF_GRAYED, 0, PWideChar(AsWide(GetText(txtHkMouse))));
   AppendMenuW(TrayMenu, MF_POPUP, UINT(HkMenu), PWideChar(AsWide(GetText(txtHkMenu))));
@@ -5683,6 +6331,9 @@ var
   msgCaption, msgText: string;
   cmdId: UINT;
   hkM, hkV: UINT;
+  i: Integer;
+  job: POcrIdxJob;
+  ujob: PUpdJob;
 begin
   Result := 0;
   if (TaskbarCreatedMsg <> 0) and (uMsg = TaskbarCreatedMsg) then
@@ -5755,12 +6406,55 @@ begin
           SnipWindow;
         HOTKEY_SNIPALL:
           SnipAll;
+        HOTKEY_SNIPLAST:
+          if SnipLastOk then
+            SnipFinish(SnipLastScr, 0);
       end;
     WM_CLIPBOARDUPDATE:
       if ClipWatchEnabled then
         SetTimer(hWnd, TIMER_CLIPCAPTURE, 300, nil);
     WM_GRAB_CLICK:
       DoGrabAtCursor(wParam);
+    WM_OCRIDX_DONE:
+      begin
+        job := POcrIdxJob(lParam);
+        if job <> nil then
+        begin
+          InterlockedDecrement(OcrIdxPending);
+          for i := 0 to High(ClipHistory) do
+            if (ClipHistory[i].Time = job^.Key) and
+               (ClipHistory[i].StampUtc.dwLowDateTime = job^.StampLo) and
+               (ClipHistory[i].StampUtc.dwHighDateTime = job^.StampHi) then
+            begin
+              ClipHistory[i].OcrText := job^.Text;
+              Break;
+            end;
+          Dispose(job);
+          if hViewWnd <> 0 then
+            PostMessage(hViewWnd, VIEW_REFRESH, 0, 0);
+        end;
+      end;
+    WM_UPDATE_DONE:
+      begin
+        UpdateChecking := False;
+        ujob := PUpdJob(lParam);
+        if ujob <> nil then
+        begin
+          if ujob^.Ok and VersionNewer(ujob^.Ver, APP_VERSION) then
+          begin
+            if MessageBoxW(hWnd,
+               PWideChar(AsWide(Format(GetText(txtUpdateNew), [ujob^.Ver]))),
+               PWideChar(AsWide('MemClip ' + APP_VERSION)),
+               MB_YESNO or MB_ICONINFORMATION) = IDYES then
+              ShellExecuteW(0, 'open', PWideChar(ujob^.Url), nil, nil, SW_SHOW);
+          end
+          else if ujob^.Ok then
+            QueueInfo(GetText(txtUpdateLatest))
+          else
+            QueueInfo(GetText(txtUpdateErr));
+          Dispose(ujob);
+        end;
+      end;
     WM_COMMAND:
       begin
         cmdId := wParam and $FFFF;
@@ -5798,6 +6492,8 @@ begin
             if SHEmptyRecycleBinW(hWnd, nil,
               SHERB_NOCONFIRMATION or SHERB_NOPROGRESSUI or SHERB_NOSOUND) >= 0 then
               QueueInfo(GetText(txtBinDone));
+          IDM_UPDATE:
+            CheckUpdates;
           IDM_LANG_AUTO: SetLangChoice('auto');
           IDM_LANG_RU: SetLangChoice('ru');
           IDM_LANG_UK: SetLangChoice('uk');
@@ -5867,6 +6563,15 @@ begin
             begin
               HotkeySnipAllMods := hkM;
               HotkeySnipAllVk := hkV;
+              ApplyHotkeys;
+              SaveConfig;
+              QueueInfoW(HotkeyText(hkM, hkV));
+            end;
+          IDM_HK_SNIPLAST:
+            if ShowHotkeyDialog(AsWide(GetText(txtHkPrompt)), hkM, hkV) then
+            begin
+              HotkeySnipLastMods := hkM;
+              HotkeySnipLastVk := hkV;
               ApplyHotkeys;
               SaveConfig;
               QueueInfoW(HotkeyText(hkM, hkV));
@@ -6044,6 +6749,7 @@ begin
 
   CoInitialize(nil);
   RoInitialize(0);
+  InitializeCriticalSection(OcrCs);
   AutostartEnabled := GetAutostartEnabled;
   TaskbarCreatedMsg := RegisterWindowMessageA('TaskbarCreated');
 
