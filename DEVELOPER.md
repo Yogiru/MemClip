@@ -320,10 +320,10 @@ GDI+→`GetDIBits` top-down) и прогоняет `OcrPixelsToText`; общий
 компонентам) → `MessageBox` + `ShellExecuteW` на `html_url` релиза.
 Ничего не скачивается и не ставится автоматически.
 
-### Радио (MFPlay / Media Foundation)
+### Фоновый звук (MFPlay / Media Foundation)
 
-- Подменю `Радио` (станции `IDM_RADIO_BASE+i`, `Стоп`, `Тише`/`Громче`,
-  чекбокс `IDM_RADIO_EN`). Радио **выключено по умолчанию**
+- Подменю `Фоновый звук` (станции `IDM_RADIO_BASE+i`, `Стоп`,
+  `Тише`/`Громче`, чекбокс `IDM_RADIO_EN`). **Выключено по умолчанию**
   (`[radio] enabled=0`): список станций читается только при включении,
   а `mfplay.dll` подгружается лениво `LoadLibraryW`+`GetProcAddress`
   при первом `RadioPlay` — нулевая цена при старте.
