@@ -320,19 +320,23 @@ GDI+→`GetDIBits` top-down) и прогоняет `OcrPixelsToText`; общий
 компонентам) → `MessageBox` + `ShellExecuteW` на `html_url` релиза.
 Ничего не скачивается и не ставится автоматически.
 
-### Радио (DirectShow)
+### Радио (MFPlay / Media Foundation)
 
 - Подменю `Радио` (станции `IDM_RADIO_BASE+i`, `Стоп`, `Тише`/`Громче`).
-  Воспроизведение через встроенный DirectShow: `CoCreateInstance
-  (CLSID_FilterGraph)` → `IMediaControl.RenderFile(url)` — URL-источник
-  Windows сам открывает MP3-поток по http(s) → `Run`. Интерфейсы
-  `IMediaControl`/`IBasicAudio` объявлены вручную по vtable.
-- Громкость — `IBasicAudio.put_Volume` (санти-белы, маппинг
-  `3000*log10(v/100)`; 0=тишина -10000, 100=полная 0).
+  Воспроизведение через `MFPCreateMediaPlayer` (mfplay.dll): возвращается
+  мгновенно, подключение к потоку идёт асинхронно — UI не блокируется.
+  `IMFPMediaPlayer` объявлен вручную по vtable mfplay.h (IUnknown-based,
+  все 33 метода в точном порядке — только `Play`/`Stop`/`SetVolume`/
+  `Shutdown` реально вызываются). fStartPlayback=TRUE — поток играет
+  как только буферизуется.
+- Громкость — `SetVolume` в диапазоне 0.0–1.0 (`RadioVolume/100`).
 - Станции: `RADIO_DEF_*` (4 встроенные) + `[radio] stationN=Name|URL`
   из INI — объединяются в `RadioNames`/`RadioUrls` при загрузке.
-- `RadioStop` вызывается из `WM_DESTROY` — граф останавливается и
-  освобождается, COM-ссылки обнуляются.
+- `RadioStop` вызывается из `WM_DESTROY` — `Stop`+`Shutdown`,
+  интерфейс обнуляется (Release при присваивании nil).
+- NB: `IMediaControl`/`IBasicAudio` (DirectShow) не использовать —
+  их база `IDispatch`, и легаси URL-источник блокирует вызов
+  `RenderFile` на время подключения.
 
 ### Диалог захвата (`ShowGrabDialog`, класс `MemClipGrab`)
 

@@ -106,13 +106,6 @@ const
   APP_VERSION = '1.1.0';
   UPD_API_URL = 'https://api.github.com/repos/Yogiru/MemClip/releases/latest';
 
-  CLSID_FILTER_GRAPH: TGUID = (D1: $E436EBB3; D2: $524F; D3: $11CE;
-    D4: ($9F, $53, $00, $20, $AF, $0B, $A7, $70));
-  IID_IMEDIA_CONTROL: TGUID = (D1: $56A868B1; D2: $0AD4; D3: $11CE;
-    D4: ($B0, $3A, $00, $20, $AF, $0B, $A7, $70));
-  IID_IBASIC_AUDIO: TGUID = (D1: $56A868B3; D2: $0AD4; D3: $11CE;
-    D4: ($B0, $3A, $00, $20, $AF, $0B, $A7, $70));
-
   RADIO_DEF_NAMES: array[0..RADIO_BUILTIN - 1] of string = (
     'Groove Salad (ambient)',
     'Drone Zone (ambient)',
@@ -309,25 +302,44 @@ type
     Url: WideString;
   end;
 
-  IMediaControl = interface(IDispatch)
-    ['{56A868B1-0AD4-11CE-B03A-0020AF0BA770}']
-    function Run: HResult; stdcall;
+  IMFPMediaPlayer = interface(IUnknown)
+    ['{A714590A-58AF-430A-85BF-44F5EC838D85}']
+    function Play: HResult; stdcall;
     function Pause: HResult; stdcall;
     function Stop: HResult; stdcall;
-    function GetState(msTimeout: Longint; out pfs: Longint): HResult; stdcall;
-    function RenderFile(strFilename: WideString): HResult; stdcall;
-    function AddSourceFilter(strFilename: WideString; out ppUnk: IDispatch): HResult; stdcall;
-    function get_FilterCollection(out ppUnk: IDispatch): HResult; stdcall;
-    function get_RegFilterCollection(out ppUnk: IDispatch): HResult; stdcall;
-    function StopWhenReady: HResult; stdcall;
-  end;
-
-  IBasicAudio = interface(IDispatch)
-    ['{56A868B3-0AD4-11CE-B03A-0020AF0BA770}']
-    function put_Volume(lVolume: Longint): HResult; stdcall;
-    function get_Volume(out plVolume: Longint): HResult; stdcall;
-    function put_Balance(lBalance: Longint): HResult; stdcall;
-    function get_Balance(out plBalance: Longint): HResult; stdcall;
+    function FrameStep: HResult; stdcall;
+    function SetPosition(const guidPositionType: TGUID; pvPositionValue: Pointer): HResult; stdcall;
+    function GetPosition(const guidPositionType: TGUID; pvPositionValue: Pointer): HResult; stdcall;
+    function GetDuration(const guidPositionType: TGUID; pvDurationValue: Pointer): HResult; stdcall;
+    function SetRate(flRate: Single): HResult; stdcall;
+    function GetRate(out pflRate: Single): HResult; stdcall;
+    function GetSupportedRates(fForwardDirection: BOOL; out pflSlowestRate, pflFastestRate: Single): HResult; stdcall;
+    function GetState(out peState: Longint): HResult; stdcall;
+    function CreateMediaItemFromURL(pwszURL: PWideChar; fSync: BOOL; dwUserData: DWORD_PTR; out ppMediaItem: Pointer): HResult; stdcall;
+    function CreateMediaItemFromObject(pIUnknownObj: IUnknown; fSync: BOOL; dwUserData: DWORD_PTR; out ppMediaItem: Pointer): HResult; stdcall;
+    function SetMediaItem(pIMFPMediaItem: Pointer): HResult; stdcall;
+    function ClearMediaItem: HResult; stdcall;
+    function GetMediaItem(out ppIMFPMediaItem: Pointer): HResult; stdcall;
+    function GetVolume(out pflVolume: Single): HResult; stdcall;
+    function SetVolume(flVolume: Single): HResult; stdcall;
+    function GetBalance(out pflBalance: Single): HResult; stdcall;
+    function SetBalance(flBalance: Single): HResult; stdcall;
+    function GetMute(out pfMute: BOOL): HResult; stdcall;
+    function SetMute(fMute: BOOL): HResult; stdcall;
+    function GetNativeVideoSize(pszVideo, pszARVideo: Pointer): HResult; stdcall;
+    function GetVideoSourceRect(pnrcSource: Pointer): HResult; stdcall;
+    function UpdateVideo: HResult; stdcall;
+    function SetVideoSourceRect(pnrcSource: Pointer): HResult; stdcall;
+    function GetAspectRatioMode(out pdwAspectRatioMode: DWORD): HResult; stdcall;
+    function SetAspectRatioMode(dwAspectRatioMode: DWORD): HResult; stdcall;
+    function GetVideoWindow(out phwndVideo: HWND): HResult; stdcall;
+    function SetVideoWindow(hwndVideo: HWND): HResult; stdcall;
+    function GetBorderColor(out pClr: DWORD): HResult; stdcall;
+    function SetBorderColor(Clr: DWORD): HResult; stdcall;
+    function InsertEffect(pEffect: IUnknown; fOptional: BOOL): HResult; stdcall;
+    function RemoveEffect(pEffect: IUnknown): HResult; stdcall;
+    function RemoveAllEffects: HResult; stdcall;
+    function Shutdown: HResult; stdcall;
   end;
 
   TMSLLHookStruct = record
@@ -1002,6 +1014,10 @@ function InternetReadFileMc(h: Pointer; buf: Pointer; num: DWORD;
   out read: DWORD): BOOL; stdcall; external 'wininet.dll' name 'InternetReadFile';
 function InternetCloseHandleMc(h: Pointer): BOOL; stdcall; external 'wininet.dll' name 'InternetCloseHandle';
 
+function MFPCreateMediaPlayer(pwszURL: PWideChar; fStartPlayback: BOOL;
+  creationOptions: DWORD; pCallback: Pointer; hWnd: HWND;
+  out ppMediaPlayer: IMFPMediaPlayer): HRESULT; stdcall; external 'mfplay.dll';
+
 function AddClipboardFormatListener(hwnd: HWND): BOOL; stdcall; external 'user32.dll' name 'AddClipboardFormatListener';
 function RoInitialize(initType: Longint): HRESULT; stdcall; external 'combase.dll';
 function RoGetActivationFactory(activatableClassId: HSTR; const iid: TGUID; out factory): HRESULT; stdcall; external 'combase.dll';
@@ -1101,8 +1117,7 @@ var
   OcrCs: TRTLCriticalSection;
   OcrIdxPending: Longint;
   UpdateChecking: Boolean;
-  gRadioMC: IMediaControl;
-  gRadioBA: IBasicAudio;
+  gRadioPlayer: IMFPMediaPlayer;
   RadioStation: Integer;
   RadioVolume: Integer;
   RadioNames: array of WideString;
@@ -3928,54 +3943,35 @@ begin
 end;
 
 procedure RadioApplyVolume;
-var
-  v: Longint;
 begin
-  if gRadioBA = nil then
-    Exit;
-  if RadioVolume <= 0 then
-    v := -10000
-  else
-  begin
-    v := Round(3000 * Log10(RadioVolume / 100));
-    if v < -10000 then
-      v := -10000;
-  end;
-  gRadioBA.put_Volume(v);
+  if gRadioPlayer <> nil then
+    gRadioPlayer.SetVolume(RadioVolume / 100);
 end;
 
 procedure RadioStop;
 begin
-  if gRadioMC <> nil then
+  if gRadioPlayer <> nil then
   begin
-    gRadioMC.Stop;
-    gRadioBA := nil;
-    gRadioMC := nil;
+    gRadioPlayer.Stop;
+    gRadioPlayer.Shutdown;
+    gRadioPlayer := nil;
   end;
   RadioStation := -1;
 end;
 
 procedure RadioPlay(idx: Integer);
 var
-  mc: IMediaControl;
+  hr: HRESULT;
 begin
   if (idx < 0) or (idx >= RadioStationCount) then
     Exit;
   RadioStop;
-  if CoCreateInstance(CLSID_FILTER_GRAPH, nil, CLSCTX_INPROC_SERVER,
-    IID_IMEDIA_CONTROL, mc) <> S_OK then
+  hr := MFPCreateMediaPlayer(PWideChar(RadioUrls[idx]), True, 0, nil,
+    hMainWnd, gRadioPlayer);
+  if (hr = S_OK) and (gRadioPlayer <> nil) then
   begin
-    QueueInfo(GetText(txtRadioFail));
-    Exit;
-  end;
-  if mc.RenderFile(RadioUrls[idx]) = S_OK then
-  begin
-    mc.Run;
-    gRadioMC := mc;
-    gRadioBA := nil;
-    if mc.QueryInterface(IID_IBASIC_AUDIO, gRadioBA) = S_OK then
-      RadioApplyVolume;
     RadioStation := idx;
+    RadioApplyVolume;
     QueueInfo(Format(GetText(txtRadioOn), [AsUTF8(RadioNames[idx])]));
   end
   else
