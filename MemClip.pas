@@ -4070,6 +4070,7 @@ var
   EditHasCur: Boolean;
   EditTextAnchor: TPoint;
   EditOrig: HBITMAP;
+  EditViewW, EditViewH: Integer;  // размеры области изображения на экране
 
 function EditCurColor: COLORREF;
 begin
@@ -4441,8 +4442,8 @@ begin
   case uMsg of
     WM_CREATE:
       begin
-        dw := Round(EditW * EditScale);
-        dh := Round(EditH * EditScale);
+        dw := EditViewW;
+        dh := EditViewH;
         for i := 0 to TOOL_COUNT - 1 do
         begin
           hEdTool[i] := CreateWindowExW(0, PWideChar(WideString('BUTTON')),
@@ -4516,7 +4517,7 @@ begin
         dc := BeginPaint(hWnd, ps);
         GetClientRect(hWnd, rc);
         dw := Round(EditW * EditScale);
-        dh := Round(EditH * EditScale);
+        dh := EditViewH;
         mdc := CreateCompatibleDC(dc);
         old := SelectObject(mdc, EditBmp);
         SetStretchBltMode(dc, HALFTONE);
@@ -4528,6 +4529,9 @@ begin
           EditShapeDraw(dc, EditShapes[i], EditScale, EDIT_TB_H);
         if EditHasCur then
           EditShapeDraw(dc, EditCur, EditScale, EDIT_TB_H);
+        rcImg := Rect(dw, EDIT_TB_H, rc.Right, EDIT_TB_H + dh);
+        if rcImg.Left < rcImg.Right then
+          FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
         rcImg := Rect(0, EDIT_TB_H + dh, rc.Right, rc.Bottom);
         if rcImg.Top < rc.Bottom then
           FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
@@ -4538,7 +4542,8 @@ begin
         pt.X := SmallInt(LongInt(lParam and $FFFF));
         pt.Y := SmallInt(LongInt(lParam shr 16));
         if (pt.Y >= EDIT_TB_H) and
-           (pt.Y < EDIT_TB_H + Round(EditH * EditScale)) then
+           (pt.Y < EDIT_TB_H + Round(EditH * EditScale)) and
+           (pt.X < Round(EditW * EditScale)) then
         begin
           if EditTool = etText then
             EditOpenTextInput(hWnd, EditPtToImg(pt.X, pt.Y))
@@ -4730,8 +4735,10 @@ begin
   minW := 6 + TOOL_COUNT * (TOOL_BTN_W + 4) + 10 + COLOR_COUNT * 28 + 10;
   if dw < minW then
     dw := minW;
+  EditViewW := dw;
+  EditViewH := dh;
   exStyle := WS_EX_TOPMOST or WS_EX_TOOLWINDOW;
-  rc := Rect(0, 0, dw + 16, EDIT_TB_H + dh + EDIT_BTN_ROW + 38);
+  rc := Rect(0, 0, dw, EDIT_TB_H + dh + EDIT_BTN_ROW);
   AdjustWindowRectEx(rc, WS_POPUP or WS_CAPTION, False, exStyle);
   hEditWnd := CreateWindowExW(exStyle, PWideChar(EditClassName),
     PWideChar(AsWide(GetText(txtEditTitle))),
