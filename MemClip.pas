@@ -4071,6 +4071,7 @@ var
   EditTextAnchor: TPoint;
   EditOrig: HBITMAP;
   EditViewW, EditViewH: Integer;  // размеры области изображения на экране
+  EditOffX: Integer;              // горизонтальный отступ (центрирование)
 
 function EditCurColor: COLORREF;
 begin
@@ -4319,7 +4320,7 @@ end;
 
 function EditPtToImg(x, y: Integer): TPoint;
 begin
-  Result.X := Round(x / EditScale);
+  Result.X := Round((x - EditOffX) / EditScale);
   Result.Y := Round((y - EDIT_TB_H) / EditScale);
   if Result.X < 0 then Result.X := 0;
   if Result.X >= EditW then Result.X := EditW - 1;
@@ -4382,7 +4383,7 @@ var
 begin
   EditCloseInput(True);
   EditTextAnchor := imgPt;
-  x := Round(imgPt.X * EditScale);
+  x := EditOffX + Round(imgPt.X * EditScale);
   y := EDIT_TB_H + Round(imgPt.Y * EditScale);
   hEditInput := CreateWindowExW(WS_EX_CLIENTEDGE, PWideChar(WideString('EDIT')), '',
     WS_CHILD or WS_VISIBLE or ES_AUTOHSCROLL,
@@ -4522,14 +4523,19 @@ begin
         old := SelectObject(mdc, EditBmp);
         SetStretchBltMode(dc, HALFTONE);
         SetBrushOrgEx(dc, 0, 0, nil);
-        StretchBlt(dc, 0, EDIT_TB_H, dw, dh, mdc, 0, 0, EditW, EditH, SRCCOPY);
+        StretchBlt(dc, EditOffX, EDIT_TB_H, dw, dh, mdc, 0, 0, EditW, EditH, SRCCOPY);
         SelectObject(mdc, old);
         DeleteDC(mdc);
+        SetViewportOrgEx(dc, EditOffX, 0, nil);
         for i := 0 to High(EditShapes) do
           EditShapeDraw(dc, EditShapes[i], EditScale, EDIT_TB_H);
         if EditHasCur then
           EditShapeDraw(dc, EditCur, EditScale, EDIT_TB_H);
-        rcImg := Rect(dw, EDIT_TB_H, rc.Right, EDIT_TB_H + dh);
+        SetViewportOrgEx(dc, 0, 0, nil);
+        rcImg := Rect(0, EDIT_TB_H, EditOffX, EDIT_TB_H + dh);
+        if rcImg.Right > 0 then
+          FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
+        rcImg := Rect(EditOffX + dw, EDIT_TB_H, rc.Right, EDIT_TB_H + dh);
         if rcImg.Left < rcImg.Right then
           FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
         rcImg := Rect(0, EDIT_TB_H + dh, rc.Right, rc.Bottom);
@@ -4543,7 +4549,8 @@ begin
         pt.Y := SmallInt(LongInt(lParam shr 16));
         if (pt.Y >= EDIT_TB_H) and
            (pt.Y < EDIT_TB_H + Round(EditH * EditScale)) and
-           (pt.X < Round(EditW * EditScale)) then
+           (pt.X >= EditOffX) and
+           (pt.X < EditOffX + Round(EditW * EditScale)) then
         begin
           if EditTool = etText then
             EditOpenTextInput(hWnd, EditPtToImg(pt.X, pt.Y))
@@ -4737,6 +4744,7 @@ begin
     dw := minW;
   EditViewW := dw;
   EditViewH := dh;
+  EditOffX := (dw - Round(w * EditScale)) div 2;
   exStyle := WS_EX_TOPMOST or WS_EX_TOOLWINDOW;
   rc := Rect(0, 0, dw, EDIT_TB_H + dh + EDIT_BTN_ROW);
   AdjustWindowRectEx(rc, WS_POPUP or WS_CAPTION, False, exStyle);
