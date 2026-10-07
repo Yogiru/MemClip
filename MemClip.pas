@@ -77,6 +77,9 @@ const
   IDM_LANG_UK = 126;
   IDM_LANG_BE = 127;
   IDM_LANG_EN = 128;
+  IDM_THEME_DAY = 176;
+  IDM_THEME_DUSK = 177;
+  IDM_THEME_NIGHT = 178;
   IDM_HK_SNIPWND = 129;
   IDM_HK_SNIPALL = 130;
   IDM_HK_SNIPLAST = 136;
@@ -266,7 +269,11 @@ type
     txtRadioOn,
     txtRadioFail,
     txtVolDn,
-    txtVolUp
+    txtVolUp,
+    txtThemeMenu,
+    txtThemeDay,
+    txtThemeDusk,
+    txtThemeNight
   );
 
   TClipKind = (ckText, ckImage, ckFiles);
@@ -660,7 +667,11 @@ const
      'Фоновый звук: %s',
      'Не удалось запустить поток',
      'Тише',
-     'Громче'),
+     'Громче',
+     'Тема',
+     'День',
+     'Сумерки',
+     'Ночь'),
 
     // Ukrainian
     ('MemClip',
@@ -764,7 +775,11 @@ const
      'Фоновий звук: %s',
      'Не вдалося запустити потік',
      'Тихіше',
-     'Гучніше'),
+     'Гучніше',
+     'Тема',
+     'День',
+     'Сутінки',
+     'Ніч'),
 
     // Belarusian
     ('MemClip',
@@ -868,7 +883,11 @@ const
      'Фонавы гук: %s',
      'Не ўдалося запусціць паток',
      'Цішэй',
-     'Гучней'),
+     'Гучней',
+     'Тэма',
+     'Дзень',
+     'Змрок',
+     'Ноч'),
 
     // English
     ('MemClip',
@@ -972,7 +991,11 @@ const
      'Background sound: %s',
      'Could not start the stream',
      'Quieter',
-     'Louder')
+     'Louder',
+     'Theme',
+     'Day',
+     'Dusk',
+     'Night')
   );
 
 const
@@ -1051,11 +1074,22 @@ function MainWndProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LR
 function PopupWndProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall; forward;
 procedure SaveConfig; forward;
 
+type
+  TPalette = record
+    PopBg, PopFg: COLORREF;
+    ViewBg, ViewFg, ViewSelBg, ViewSelFg: COLORREF;
+    GrabBg, GrabEditBg, GrabEditFg: COLORREF;
+    WinBg: COLORREF;
+  end;
+
 var
   hMainWnd, hPopupWnd: HWND;
   hPopupFont: HFONT;
   hPopupBrush: HBRUSH;
   hGrabBrush, hGrabEditBrush, hSnipBrush: HBRUSH;
+  hWinBgBrush, hViewBgBrush, hViewSelBrush: HBRUSH;
+  Pal: TPalette;
+  ThemeSetting: string;
   AppIcon: HICON;
   hEvent: HANDLE;
   hThread: THandle;
@@ -1413,6 +1447,94 @@ procedure SetLangChoice(const s: string);
 begin
   LangSetting := s;
   ApplyLangSetting;
+  SaveConfig;
+end;
+
+procedure ApplyThemeSetting;
+begin
+  if ThemeSetting = 'night' then
+  begin
+    Pal.PopBg := RGB(32, 32, 36);
+    Pal.PopFg := RGB(240, 240, 240);
+    Pal.ViewBg := RGB(30, 30, 34);
+    Pal.ViewFg := RGB(235, 235, 235);
+    Pal.ViewSelBg := RGB(70, 90, 120);
+    Pal.ViewSelFg := RGB(255, 255, 255);
+    Pal.GrabBg := RGB(45, 45, 50);
+    Pal.GrabEditBg := RGB(40, 40, 45);
+    Pal.GrabEditFg := RGB(235, 235, 235);
+    Pal.WinBg := RGB(30, 30, 34);
+  end
+  else if ThemeSetting = 'dusk' then
+  begin
+    Pal.PopBg := RGB(74, 62, 70);
+    Pal.PopFg := RGB(242, 232, 222);
+    Pal.ViewBg := RGB(66, 56, 62);
+    Pal.ViewFg := RGB(238, 226, 214);
+    Pal.ViewSelBg := RGB(148, 102, 86);
+    Pal.ViewSelFg := RGB(255, 255, 255);
+    Pal.GrabBg := RGB(104, 82, 72);
+    Pal.GrabEditBg := RGB(84, 70, 66);
+    Pal.GrabEditFg := RGB(242, 230, 216);
+    Pal.WinBg := RGB(58, 50, 56);
+  end
+  else
+  begin
+    ThemeSetting := 'day';
+    Pal.PopBg := RGB(250, 250, 248);
+    Pal.PopFg := RGB(25, 25, 25);
+    Pal.ViewBg := RGB(255, 255, 255);
+    Pal.ViewFg := RGB(30, 30, 30);
+    Pal.ViewSelBg := RGB(0, 120, 215);
+    Pal.ViewSelFg := RGB(255, 255, 255);
+    Pal.GrabBg := RGB(255, 206, 163);
+    Pal.GrabEditBg := RGB(255, 247, 234);
+    Pal.GrabEditFg := RGB(30, 30, 30);
+    Pal.WinBg := RGB(240, 240, 240);
+  end;
+
+  if hPopupBrush <> 0 then
+    DeleteObject(hPopupBrush);
+  hPopupBrush := CreateSolidBrush(Pal.PopBg);
+  if hGrabBrush <> 0 then
+    DeleteObject(hGrabBrush);
+  hGrabBrush := CreateSolidBrush(Pal.GrabBg);
+  if hGrabEditBrush <> 0 then
+    DeleteObject(hGrabEditBrush);
+  hGrabEditBrush := CreateSolidBrush(Pal.GrabEditBg);
+  if hWinBgBrush <> 0 then
+    DeleteObject(hWinBgBrush);
+  hWinBgBrush := CreateSolidBrush(Pal.WinBg);
+  if hViewBgBrush <> 0 then
+    DeleteObject(hViewBgBrush);
+  hViewBgBrush := CreateSolidBrush(Pal.ViewBg);
+  if hViewSelBrush <> 0 then
+    DeleteObject(hViewSelBrush);
+  hViewSelBrush := CreateSolidBrush(Pal.ViewSelBg);
+
+  if hViewWnd <> 0 then
+  begin
+    SetClassLongW(hViewWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
+    InvalidateRect(hViewWnd, nil, True);
+  end;
+  if hGrabWnd <> 0 then
+  begin
+    SetClassLongW(hGrabWnd, GCL_HBRBACKGROUND, LONGINT(hGrabBrush));
+    InvalidateRect(hGrabWnd, nil, True);
+  end;
+  if hEditWnd <> 0 then
+  begin
+    SetClassLongW(hEditWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
+    InvalidateRect(hEditWnd, nil, True);
+  end;
+  if hPopupWnd <> 0 then
+    InvalidateRect(hPopupWnd, nil, True);
+end;
+
+procedure SetThemeChoice(const s: string);
+begin
+  ThemeSetting := s;
+  ApplyThemeSetting;
   SaveConfig;
 end;
 
@@ -2938,13 +3060,13 @@ begin
     Exit;
   if (dis^.itemState and ODS_SELECTED) <> 0 then
   begin
-    FillRect(dis^.hDC, dis^.rcItem, GetSysColorBrush(COLOR_HIGHLIGHT));
-    SetTextColor(dis^.hDC, GetSysColor(COLOR_HIGHLIGHTTEXT));
+    FillRect(dis^.hDC, dis^.rcItem, hViewSelBrush);
+    SetTextColor(dis^.hDC, Pal.ViewSelFg);
   end
   else
   begin
-    FillRect(dis^.hDC, dis^.rcItem, GetSysColorBrush(COLOR_WINDOW));
-    SetTextColor(dis^.hDC, GetSysColor(COLOR_WINDOWTEXT));
+    FillRect(dis^.hDC, dis^.rcItem, hViewBgBrush);
+    SetTextColor(dis^.hDC, Pal.ViewFg);
   end;
   SetBkMode(dis^.hDC, TRANSPARENT);
   tx := dis^.rcItem.Left + 8;
@@ -3099,6 +3221,12 @@ begin
           end;
         end;
       end;
+    WM_CTLCOLOREDIT:
+      begin
+        SetBkColor(HDC(wParam), Pal.ViewBg);
+        SetTextColor(HDC(wParam), Pal.ViewFg);
+        Result := LRESULT(hViewBgBrush);
+      end;
     WM_COMMAND:
       case wParam and $FFFF of
         IDC_VIEW_EDIT:
@@ -3183,7 +3311,7 @@ begin
     wc.lpfnWndProc := @ViewerWndProc;
     wc.hInstance := HInstance;
     wc.hCursor := LoadCursor(0, IDC_ARROW);
-    wc.hbrBackground := COLOR_BTNFACE + 1;
+    wc.hbrBackground := hWinBgBrush;
     wc.lpszClassName := PWideChar(AsWide(ViewerClassName));
     if RegisterClassW(wc) <> 0 then
       ViewerClsReg := True
@@ -3200,6 +3328,7 @@ begin
     0, 0, HInstance, nil);
   if hViewWnd = 0 then
     Exit;
+  SetClassLongW(hViewWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
   ShowWindow(hViewWnd, SW_SHOW);
   UpdateWindow(hViewWnd);
   SetForegroundWindow(hViewWnd);
@@ -4246,7 +4375,8 @@ begin
       end;
     WM_CTLCOLOREDIT:
       begin
-        SetBkColor(HDC(wParam), RGB(255, 247, 234));
+        SetBkColor(HDC(wParam), Pal.GrabEditBg);
+        SetTextColor(HDC(wParam), Pal.GrabEditFg);
         Result := LRESULT(hGrabEditBrush);
       end;
     WM_CTLCOLORBTN:
@@ -4322,6 +4452,7 @@ begin
     x, y, GRAB_WIN_W, GRAB_WIN_H, 0, 0, HInstance, nil);
   if hGrabWnd = 0 then
     Exit;
+  SetClassLongW(hGrabWnd, GCL_HBRBACKGROUND, LONGINT(hGrabBrush));
   SetWindowTextW(hGrabEdit, PWideChar(s));
   SendMessageW(hGrabEdit, EM_SETSEL, 2, -1);
   ShowWindow(hGrabWnd, SW_SHOW);
@@ -5331,13 +5462,13 @@ begin
         SetViewportOrgEx(dc, 0, 0, nil);
         rcImg := Rect(0, EDIT_TB_H, EditOffX, EDIT_TB_H + dh);
         if rcImg.Right > 0 then
-          FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
+          FillRect(dc, rcImg, hWinBgBrush);
         rcImg := Rect(EditOffX + dw, EDIT_TB_H, rc.Right, EDIT_TB_H + dh);
         if rcImg.Left < rcImg.Right then
-          FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
+          FillRect(dc, rcImg, hWinBgBrush);
         rcImg := Rect(0, EDIT_TB_H + dh, rc.Right, rc.Bottom);
         if rcImg.Top < rc.Bottom then
-          FillRect(dc, rcImg, GetSysColorBrush(COLOR_BTNFACE));
+          FillRect(dc, rcImg, hWinBgBrush);
         EndPaint(hWnd, ps);
       end;
     WM_LBUTTONDOWN:
@@ -5517,7 +5648,7 @@ begin
     wc.lpfnWndProc := @EditWndProc;
     wc.hInstance := HInstance;
     wc.hCursor := LoadCursor(0, IDC_CROSS);
-    wc.hbrBackground := HBRUSH(COLOR_BTNFACE + 1);
+    wc.hbrBackground := hWinBgBrush;
     wc.lpszClassName := PWideChar(EditClassName);
     RegisterClassW(wc);
   end;
@@ -5562,6 +5693,7 @@ begin
     DeleteObject(bmp);
     Exit;
   end;
+  SetClassLongW(hEditWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
   EditOrig := EditCopyBmp(EditBmp);
   SetForegroundWindow(hEditWnd);
   SetFocus(hEditWnd);
@@ -5877,6 +6009,11 @@ begin
   if n > 0 then
     buf[n] := #0;
   LangSetting := LowerCase(String(PWideChar(@buf[0])));
+  n := GetPrivateProfileStringW(PWideChar(WideString('main')),
+    PWideChar(WideString('theme')), nil, buf, Length(buf), p);
+  if n > 0 then
+    buf[n] := #0;
+  ThemeSetting := LowerCase(String(PWideChar(@buf[0])));
   ClipMergeEnabled := GetPrivateProfileIntW(PWideChar(WideString('clipboard')),
     PWideChar(WideString('merge')), 0, p) <> 0;
   ClipHistoryMax := GetPrivateProfileIntW(PWideChar(WideString('clipboard')),
@@ -5952,6 +6089,8 @@ begin
     PWideChar(AsWide(IntToStr(MemFreeMinMb))), p);
   WritePrivateProfileStringW(PWideChar(WideString('main')), PWideChar(WideString('lang')),
     PWideChar(WideString(LangSetting)), p);
+  WritePrivateProfileStringW(PWideChar(WideString('main')), PWideChar(WideString('theme')),
+    PWideChar(WideString(ThemeSetting)), p);
   if ClipMergeEnabled then
     WritePrivateProfileStringW(PWideChar(WideString('clipboard')), PWideChar(WideString('merge')),
       '1', p)
@@ -6340,7 +6479,7 @@ end;
 
 procedure ShowTrayMenu(x, y: Integer);
 var
-  TrayMenu, IntervalMenu, HkMenu, LangMenu, RadioMenu: HMENU;
+  TrayMenu, IntervalMenu, HkMenu, LangMenu, RadioMenu, ThemeMenu: HMENU;
   uFlags: UINT;
   sManual, sClean, sAutostart, sInterval, sExit: string;
   sClipWatch, sClipAutoPaste, sGrabToggle: string;
@@ -6500,6 +6639,21 @@ begin
   AppendMenuW(LangMenu, uFlags, IDM_LANG_EN, 'English');
   AppendMenuW(TrayMenu, MF_POPUP, UINT(LangMenu), PWideChar(AsWide(GetText(txtLangMenu))));
 
+  ThemeMenu := CreatePopupMenu;
+  uFlags := MF_STRING;
+  if ThemeSetting = 'day' then
+    uFlags := uFlags or MF_CHECKED;
+  AppendMenuW(ThemeMenu, uFlags, IDM_THEME_DAY, PWideChar(AsWide(GetText(txtThemeDay))));
+  uFlags := MF_STRING;
+  if ThemeSetting = 'dusk' then
+    uFlags := uFlags or MF_CHECKED;
+  AppendMenuW(ThemeMenu, uFlags, IDM_THEME_DUSK, PWideChar(AsWide(GetText(txtThemeDusk))));
+  uFlags := MF_STRING;
+  if ThemeSetting = 'night' then
+    uFlags := uFlags or MF_CHECKED;
+  AppendMenuW(ThemeMenu, uFlags, IDM_THEME_NIGHT, PWideChar(AsWide(GetText(txtThemeNight))));
+  AppendMenuW(TrayMenu, MF_POPUP, UINT(ThemeMenu), PWideChar(AsWide(GetText(txtThemeMenu))));
+
   uFlags := MF_STRING;
   if AutostartEnabled then
     uFlags := uFlags or MF_CHECKED;
@@ -6517,6 +6671,7 @@ begin
   DestroyMenu(IntervalMenu);
   DestroyMenu(HkMenu);
   DestroyMenu(LangMenu);
+  DestroyMenu(ThemeMenu);
   DestroyMenu(TrayMenu);
 end;
 
@@ -6737,6 +6892,9 @@ begin
           IDM_LANG_UK: SetLangChoice('uk');
           IDM_LANG_BE: SetLangChoice('be');
           IDM_LANG_EN: SetLangChoice('en');
+          IDM_THEME_DAY: SetThemeChoice('day');
+          IDM_THEME_DUSK: SetThemeChoice('dusk');
+          IDM_THEME_NIGHT: SetThemeChoice('night');
           IDM_CLIPMERGE:
             begin
               ClipMergeEnabled := not ClipMergeEnabled;
@@ -6917,7 +7075,7 @@ begin
           begin
             hOldFont := HFONT(SelectObject(dc, hPopupFont));
             SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, RGB(255, 255, 255));
+            SetTextColor(dc, Pal.PopFg);
             DrawTextW(dc, PWideChar(PopupText), -1, rc,
               DT_CENTER or DT_VCENTER or DT_SINGLELINE or DT_NOPREFIX);
             SelectObject(dc, hOldFont);
@@ -6972,6 +7130,7 @@ begin
   ClipHistoryMax := CLIP_HISTORY_MAX;
   MemFreeMinMb := 0;
   LangSetting := 'auto';
+  ThemeSetting := 'day';
 
   if not IsElevated then
   begin
@@ -7009,11 +7168,9 @@ begin
   if AppIcon = 0 then
     AppIcon := LoadIcon(0, IDI_APPLICATION);
 
-  hPopupBrush := CreateSolidBrush(RGB(30, 30, 30));
   hPopupFont := HFONT(GetStockObject(DEFAULT_GUI_FONT));
-  hGrabBrush := CreateSolidBrush(RGB(255, 206, 163));
   hSnipBrush := CreateSolidBrush(RGB(0, 0, 0));
-  hGrabEditBrush := CreateSolidBrush(RGB(255, 247, 234));
+  ApplyThemeSetting;
 
   FillChar(wc, SizeOf(wc), 0);
   wc.lpfnWndProc := @MainWndProc;

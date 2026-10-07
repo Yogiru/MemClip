@@ -454,6 +454,9 @@ auto_paste=1        ; автовставка Ctrl+V после выбора из
 grab_enabled=1      ; хоткеи/жесты захвата текста
 mem_free_min_mb=0   ; автоочистка, когда свободно < N МБ (0 = выкл)
 lang=auto           ; auto | ru | uk | be | en
+theme=day           ; day | dusk | night — палитра окон (см. TPalette,
+                    ; ApplyThemeSetting): перекрашивает кисти и фоны
+                    ; viewer/popup/grab/редактора, INI-ключ theme
 ```
 
 Секция `[main]` пишется при каждом изменении (интервал, ручной режим,
