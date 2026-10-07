@@ -110,7 +110,7 @@ const
   HOTKEY_SNIPALL = 7;
   HOTKEY_SNIPLAST = 8;
 
-  APP_VERSION = '1.1.0';
+  APP_VERSION = '1.2.0';
   UPD_API_URL = 'https://api.github.com/repos/Yogiru/MemClip/releases/latest';
 
   RADIO_DEF_NAMES: array[0..RADIO_BUILTIN - 1] of string = (
