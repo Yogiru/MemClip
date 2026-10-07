@@ -1090,6 +1090,9 @@ var
   hWinBgBrush, hViewBgBrush, hViewSelBrush: HBRUSH;
   Pal: TPalette;
   ThemeSetting: string;
+  pfnSetPreferredAppMode: function(mode: Integer): Integer; stdcall;
+  pfnFlushMenuThemes: procedure; stdcall;
+  pfnAllowDarkModeForWindow: function(wnd: HWND; allow: BOOL): BOOL; stdcall;
   AppIcon: HICON;
   hEvent: HANDLE;
   hThread: THandle;
@@ -1450,6 +1453,70 @@ begin
   SaveConfig;
 end;
 
+function SetWindowTheme(hwnd: HWND; pszSubAppName, pszSubIdList: PWideChar): HRESULT; stdcall; external 'uxtheme.dll';
+function DwmSetWindowAttribute(hwnd: HWND; dwAttribute: DWORD; pvAttribute: Pointer; cbAttribute: DWORD): HRESULT; stdcall; external 'dwmapi.dll';
+
+procedure InitDarkModeApi;
+var
+  h: HMODULE;
+begin
+  h := GetModuleHandleW('uxtheme.dll');
+  if h = 0 then
+    h := LoadLibraryW('uxtheme.dll');
+  if h = 0 then
+    Exit;
+  Pointer(pfnSetPreferredAppMode) := GetProcAddress(h, PAnsiChar(135));
+  Pointer(pfnFlushMenuThemes) := GetProcAddress(h, PAnsiChar(136));
+  Pointer(pfnAllowDarkModeForWindow) := GetProcAddress(h, PAnsiChar(133));
+end;
+
+procedure DwmTitleDark(w: HWND; Dark: Boolean);
+var
+  v: BOOL;
+begin
+  if w = 0 then
+    Exit;
+  v := Dark;
+  if Failed(DwmSetWindowAttribute(w, 20, @v, 4)) then
+    DwmSetWindowAttribute(w, 19, @v, 4);
+end;
+
+procedure ApplyControlTheme(w: HWND; Dark, IsList: Boolean);
+begin
+  if w = 0 then
+    Exit;
+  if Assigned(pfnAllowDarkModeForWindow) then
+    pfnAllowDarkModeForWindow(w, Dark);
+  if Dark then
+    if IsList then
+      SetWindowTheme(w, 'DarkMode_Explorer', nil)
+    else
+      SetWindowTheme(w, 'DarkMode_CFD', nil)
+  else if IsList then
+    SetWindowTheme(w, 'Explorer', nil)
+  else
+    SetWindowTheme(w, 'CFD', nil);
+end;
+
+procedure ApplyChromeTheme(Dark: Boolean);
+begin
+  if Assigned(pfnSetPreferredAppMode) then
+  begin
+    if Dark then
+      pfnSetPreferredAppMode(2)
+    else
+      pfnSetPreferredAppMode(3);
+    if Assigned(pfnFlushMenuThemes) then
+      pfnFlushMenuThemes;
+  end;
+  DwmTitleDark(hViewWnd, Dark);
+  DwmTitleDark(hGrabWnd, Dark);
+  DwmTitleDark(hEditWnd, Dark);
+  ApplyControlTheme(hViewEdit, Dark, False);
+  ApplyControlTheme(hViewList, Dark, True);
+  ApplyControlTheme(hGrabEdit, Dark, False);
+end;
+
 procedure ApplyThemeSetting;
 begin
   if ThemeSetting = 'night' then
@@ -1511,6 +1578,8 @@ begin
   if hViewSelBrush <> 0 then
     DeleteObject(hViewSelBrush);
   hViewSelBrush := CreateSolidBrush(Pal.ViewSelBg);
+
+  ApplyChromeTheme(ThemeSetting <> 'day');
 
   if hViewWnd <> 0 then
   begin
@@ -3329,6 +3398,7 @@ begin
   if hViewWnd = 0 then
     Exit;
   SetClassLongW(hViewWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
+  ApplyChromeTheme(ThemeSetting <> 'day');
   ShowWindow(hViewWnd, SW_SHOW);
   UpdateWindow(hViewWnd);
   SetForegroundWindow(hViewWnd);
@@ -4453,6 +4523,7 @@ begin
   if hGrabWnd = 0 then
     Exit;
   SetClassLongW(hGrabWnd, GCL_HBRBACKGROUND, LONGINT(hGrabBrush));
+  ApplyChromeTheme(ThemeSetting <> 'day');
   SetWindowTextW(hGrabEdit, PWideChar(s));
   SendMessageW(hGrabEdit, EM_SETSEL, 2, -1);
   ShowWindow(hGrabWnd, SW_SHOW);
@@ -5694,6 +5765,7 @@ begin
     Exit;
   end;
   SetClassLongW(hEditWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
+  ApplyChromeTheme(ThemeSetting <> 'day');
   EditOrig := EditCopyBmp(EditBmp);
   SetForegroundWindow(hEditWnd);
   SetFocus(hEditWnd);
@@ -7170,6 +7242,7 @@ begin
 
   hPopupFont := HFONT(GetStockObject(DEFAULT_GUI_FONT));
   hSnipBrush := CreateSolidBrush(RGB(0, 0, 0));
+  InitDarkModeApi;
   ApplyThemeSetting;
 
   FillChar(wc, SizeOf(wc), 0);
