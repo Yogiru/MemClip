@@ -192,7 +192,6 @@ type
     txtIntervalMax,
     txtErrNotAdmin,
     txtManual,
-    txtClipMenu,
     txtClipWatch,
     txtClipAutoPaste,
     txtClipClear,
@@ -350,15 +349,6 @@ type
     function RemoveAllEffects: HResult; stdcall;
     function Shutdown: HResult; stdcall;
   end;
-
-  TMSLLHookStruct = record
-    pt: TPoint;
-    mouseData: DWORD;
-    flags: DWORD;
-    time: DWORD;
-    dwExtraInfo: ULONG_PTR;
-  end;
-  PMSLLHookStruct = ^TMSLLHookStruct;
 
   IAccessible = interface(IDispatch)
     ['{618736E0-3C3D-11CF-810C-00AA00389B71}']
@@ -590,7 +580,6 @@ const
      'Максимальный интервал: %d %s',
      'Требуются права администратора.',
      'Вручную',
-     'История буфера',
      'Запоминать буфер (Ctrl+Alt+V)',
      'Вставлять сразу',
      'Очистить историю',
@@ -698,7 +687,6 @@ const
      'Максимальний інтервал: %d %s',
      'Потрібні права адміністратора.',
      'Вручну',
-     'Історія буфера',
      'Запам''ятовувати буфер (Ctrl+Alt+V)',
      'Вставляти одразу',
      'Очистити історію',
@@ -806,7 +794,6 @@ const
      'Максімальны інтэрвал: %d %s',
      'Патрэбны правы адміністратара.',
      'Уручную',
-     'Гісторыя буфера',
      'Запамінаць буфер (Ctrl+Alt+V)',
      'Уставляць адразу',
      'Ачысціць гісторыю',
@@ -914,7 +901,6 @@ const
      'Max interval: %d %s',
      'Administrator rights are required.',
      'Manual',
-     'Clipboard history',
      'Remember clipboard (Ctrl+Alt+V)',
      'Paste immediately',
      'Clear history',
@@ -3163,7 +3149,6 @@ end;
 
 function ViewerWndProc(hWnd: HWND; uMsg: UINT; wParam: WPARAM; lParam: LPARAM): LRESULT; stdcall;
 var
-  rc: TRect;
   sel: Integer;
   ws: WideString;
   ptScreen, ptC: TPoint;
@@ -5437,7 +5422,6 @@ var
   i, dw, dh, cid: Integer;
   dis: PDRAWITEMSTRUCT;
   br: HBRUSH;
-  sh: TEditShape;
 begin
   Result := 0;
   case uMsg of
