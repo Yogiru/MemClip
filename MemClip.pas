@@ -24,6 +24,9 @@ const
   WM_GRAB_CLICK = WM_USER + 3;
   WM_OCRIDX_DONE = WM_APP + 6;
   WM_UPDATE_DONE = WM_APP + 7;
+  WM_RADIO_FAIL = WM_APP + 8;
+  MFP_EVENT_ERROR = 10;
+  MFP_EVENT_ENDED = 11;
 
   NIM_ADD = 0;
   NIM_MODIFY = 1;
@@ -308,6 +311,24 @@ type
     Ok: Boolean;
     Ver: string;
     Url: WideString;
+  end;
+
+  PMfpEventHeader = ^TMfpEventHeader;
+  TMfpEventHeader = record
+    eEventType: Integer;
+    hrEvent: HRESULT;
+    pMediaPlayer: Pointer;
+    pMediaItem: Pointer;
+    dwUserData: DWORD;
+  end;
+
+  IMFPMediaPlayerCallback = interface(IUnknown)
+    ['{766C8FFB-5FDB-4FEA-A28D-B912996F51BD}']
+    procedure OnMediaPlayerEvent(pEventHeader: PMfpEventHeader); stdcall;
+  end;
+
+  TRadioCallback = class(TInterfacedObject, IMFPMediaPlayerCallback)
+    procedure OnMediaPlayerEvent(pEventHeader: PMfpEventHeader); stdcall;
   end;
 
   IMFPMediaPlayer = interface(IUnknown)
@@ -1148,6 +1169,7 @@ var
   OcrIdxPending: Longint;
   UpdateChecking: Boolean;
   gRadioPlayer: IMFPMediaPlayer;
+  gRadioCb: IMFPMediaPlayerCallback;
   RadioEnabled: Boolean;
   hMfpDll: THandle;
   pfnMfpCreate: TMfpCreateFn;
@@ -4137,6 +4159,16 @@ begin
   Result := Length(RadioNames);
 end;
 
+procedure TRadioCallback.OnMediaPlayerEvent(pEventHeader: PMfpEventHeader); stdcall;
+begin
+  if pEventHeader = nil then
+    Exit;
+  if (pEventHeader^.eEventType = MFP_EVENT_ERROR) or
+     (pEventHeader^.eEventType = MFP_EVENT_ENDED) or
+     Failed(pEventHeader^.hrEvent) then
+    PostMessage(hMainWnd, WM_RADIO_FAIL, 0, 0);
+end;
+
 procedure RadioApplyVolume;
 begin
   if gRadioPlayer <> nil then
@@ -4172,7 +4204,9 @@ begin
     QueueInfo(GetText(txtRadioFail));
     Exit;
   end;
-  hr := pfnMfpCreate(PWideChar(RadioUrls[idx]), True, 0, nil,
+  if gRadioCb = nil then
+    gRadioCb := TRadioCallback.Create;
+  hr := pfnMfpCreate(PWideChar(RadioUrls[idx]), True, 0, gRadioCb,
     hMainWnd, gRadioPlayer);
   if (hr = S_OK) and (gRadioPlayer <> nil) then
   begin
@@ -6870,6 +6904,11 @@ begin
           if hViewWnd <> 0 then
             PostMessage(hViewWnd, VIEW_REFRESH, 0, 0);
         end;
+      end;
+    WM_RADIO_FAIL:
+      begin
+        RadioStop;
+        QueueInfo(GetText(txtRadioFail));
       end;
     WM_UPDATE_DONE:
       begin
