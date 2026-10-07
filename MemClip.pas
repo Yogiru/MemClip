@@ -3290,7 +3290,8 @@ begin
           end;
         end;
       end;
-    WM_CTLCOLOREDIT:
+    WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX:
       begin
         SetBkColor(HDC(wParam), Pal.ViewBg);
         SetTextColor(HDC(wParam), Pal.ViewFg);
