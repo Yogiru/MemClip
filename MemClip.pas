@@ -1534,16 +1534,16 @@ begin
   end
   else if ThemeSetting = 'dusk' then
   begin
-    Pal.PopBg := RGB(74, 62, 70);
-    Pal.PopFg := RGB(242, 232, 222);
-    Pal.ViewBg := RGB(66, 56, 62);
-    Pal.ViewFg := RGB(238, 226, 214);
-    Pal.ViewSelBg := RGB(148, 102, 86);
-    Pal.ViewSelFg := RGB(255, 255, 255);
-    Pal.GrabBg := RGB(104, 82, 72);
-    Pal.GrabEditBg := RGB(84, 70, 66);
-    Pal.GrabEditFg := RGB(242, 230, 216);
-    Pal.WinBg := RGB(58, 50, 56);
+    Pal.PopBg := RGB(112, 90, 80);
+    Pal.PopFg := RGB(248, 238, 224);
+    Pal.ViewBg := RGB(96, 78, 70);
+    Pal.ViewFg := RGB(245, 232, 216);
+    Pal.ViewSelBg := RGB(192, 140, 96);
+    Pal.ViewSelFg := RGB(40, 28, 20);
+    Pal.GrabBg := RGB(150, 118, 98);
+    Pal.GrabEditBg := RGB(128, 104, 90);
+    Pal.GrabEditFg := RGB(250, 240, 222);
+    Pal.WinBg := RGB(88, 72, 66);
   end
   else
   begin
@@ -1579,7 +1579,7 @@ begin
     DeleteObject(hViewSelBrush);
   hViewSelBrush := CreateSolidBrush(Pal.ViewSelBg);
 
-  ApplyChromeTheme(ThemeSetting <> 'day');
+  ApplyChromeTheme(ThemeSetting = 'night');
 
   if hViewWnd <> 0 then
   begin
@@ -3398,7 +3398,7 @@ begin
   if hViewWnd = 0 then
     Exit;
   SetClassLongW(hViewWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
-  ApplyChromeTheme(ThemeSetting <> 'day');
+  ApplyChromeTheme(ThemeSetting = 'night');
   ShowWindow(hViewWnd, SW_SHOW);
   UpdateWindow(hViewWnd);
   SetForegroundWindow(hViewWnd);
@@ -4523,7 +4523,7 @@ begin
   if hGrabWnd = 0 then
     Exit;
   SetClassLongW(hGrabWnd, GCL_HBRBACKGROUND, LONGINT(hGrabBrush));
-  ApplyChromeTheme(ThemeSetting <> 'day');
+  ApplyChromeTheme(ThemeSetting = 'night');
   SetWindowTextW(hGrabEdit, PWideChar(s));
   SendMessageW(hGrabEdit, EM_SETSEL, 2, -1);
   ShowWindow(hGrabWnd, SW_SHOW);
@@ -5765,7 +5765,7 @@ begin
     Exit;
   end;
   SetClassLongW(hEditWnd, GCL_HBRBACKGROUND, LONGINT(hWinBgBrush));
-  ApplyChromeTheme(ThemeSetting <> 'day');
+  ApplyChromeTheme(ThemeSetting = 'night');
   EditOrig := EditCopyBmp(EditBmp);
   SetForegroundWindow(hEditWnd);
   SetFocus(hEditWnd);
